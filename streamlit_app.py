@@ -1,13 +1,16 @@
 import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players
+import nfl_data_py as nfl
 from datetime import datetime
+from utils import current_week
 
 st.title("Sleeper Best Ball Outcome Predictor 🏈")
+season = int(st.query_params.get('season', datetime.now().year))
+schedule = nfl.import_schedules([season])
 
 league_id = st.query_params.get('league', None)
-week = int(st.query_params.get('week', 1))
-season = int(st.query_params.get('season', datetime.now().year))
+week = int(st.query_params.get('week', current_week(schedule)))
 
 if league_id is None:
     username = st.text_input("Enter your Sleeper username:")
