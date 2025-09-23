@@ -1,19 +1,9 @@
-# 🎈 Blank app template
+# 🏈 Sleeper Best Ball
 
-A simple Streamlit app template for you to modify!
+A simple Streamlit app that projects fantasy football matchup scores for best ball leagues
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+Sleeper currently prioritizes scored points over future player projections, even if those projections are higher, causing a misleading projected score and winner. 
 
-### How to run it on your own machine
+This app provides optimistic projections, leveraging https://github.com/dtsong/sleeper-api-wrapper to query the sleeper API, and is available for use at  https://sleeper-best-ball.streamlit.app/
 
-1. Install the requirements
-
-   ```
-   $ pip install -r requirements.txt
-   ```
-
-2. Run the app
-
-   ```
-   $ streamlit run streamlit_app.py
-   ```
+Currently this app is tailored to my league format, but I am open to contributions to support more league formats.  
