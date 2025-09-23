@@ -3,14 +3,15 @@ import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players
 import nfl_data_py as nfl
 from datetime import datetime
-from utils import current_week, is_game_over
+import utils
 
 st.title("Sleeper Best Ball Outcome Predictor 🏈")
 season = int(st.query_params.get('season', datetime.now().year))
 schedule = nfl.import_schedules([season])
 
 league_id = st.query_params.get('league', None)
-week = int(st.session_state.selected_week or st.query_params.get('week') or current_week(schedule))
+week = int(st.session_state.selected_week or st.query_params.get(
+    'week') or utils.current_week(schedule))
 
 if league_id is None:
     username = st.text_input("Enter your Sleeper username:")
@@ -43,48 +44,6 @@ else:
     rosters = league.get_rosters()
     users = league.get_users()
 
-    def get_optimistic_score(df):
-        # Only consider players who played or have a projection
-        df = df.copy()
-        df['optimistic'] = df.apply(
-            lambda row: row['points'] if row['game_played'] else row['projection'], axis=1
-        )
-        df = df[df['optimistic'].notnull()]
-        # Split by position
-        qbs = df[df['position'] == 'QB'].sort_values(
-            'optimistic', ascending=False)
-        rbs = df[df['position'] == 'RB'].sort_values(
-            'optimistic', ascending=False)
-        wrs = df[df['position'] == 'WR'].sort_values(
-            'optimistic', ascending=False)
-        tes = df[df['position'] == 'TE'].sort_values(
-            'optimistic', ascending=False)
-        flex = df[df['position'].isin(['RB', 'WR', 'TE'])].sort_values(
-            'optimistic', ascending=False)
-        superflex = df.sort_values('optimistic', ascending=False)
-
-        starters = []
-        # 1 QB
-        starters += qbs.head(1).to_dict('records')
-        # 3 RB
-        starters += rbs.head(3).to_dict('records')
-        # 3 WR
-        starters += wrs.head(3).to_dict('records')
-        # 2 TE
-        starters += tes.head(2).to_dict('records')
-        # 1 RB/WR/TE FLEX (not already counted)
-        used_ids = {p['player_id'] for p in starters}
-        flex_avail = flex[~flex['player_id'].isin(used_ids)]
-        starters += flex_avail.head(1).to_dict('records')
-        used_ids = {p['player_id'] for p in starters}
-        # 1 SUPERFLEX (QB/RB/WR/TE, not already counted)
-        superflex_avail = superflex[~superflex['player_id'].isin(used_ids)]
-        starters += superflex_avail.head(1).to_dict('records')
-        # Calculate total
-        total = sum(p['optimistic']
-                    for p in starters if p['optimistic'] is not None)
-        return total, starters
-
     players = []
     matchup_dict = {}
     for matchup in matchups:
@@ -106,20 +65,73 @@ else:
                 "position": player.get('position'),
                 "points": points,
                 "projection": projection,
-                "game_played": is_game_over(schedule, week, player.get('team'))
+                "game_played": utils.is_game_over(schedule, week, player.get('team'))
             })
 
     players_df = pd.DataFrame(players)
     users_df = pd.DataFrame(users)
     st.header("Matchups")
     for matchup_id, user_ids in matchup_dict.items():
-        cols = st.columns(len(user_ids))
-        for idx, user_id in enumerate(user_ids):
+        # Only support 2-team matchups for this table format
+        if len(user_ids) != 2:
+            st.warning("Only 2-team matchups are supported for this view.")
+            continue
+
+        team_dfs = []
+        team_names = []
+        team_scores = []
+        starters_list = []
+        for user_id in user_ids:
             team_df = players_df[players_df['user_id'] == user_id]
-            optimistic_score, starters = get_optimistic_score(team_df)
+            optimistic_score, starters = utils.calculate_optimistic_starters(
+                team_df)
             user_display_name = users_df.loc[users_df['user_id']
                                              == user_id, 'display_name'].values[0]
-            cols[idx].markdown(f"**{user_display_name}**")
-            cols[idx].write(f"Projected Score: **{optimistic_score:.2f}**")
-            cols[idx].dataframe(pd.DataFrame(starters)[
-                                ['player_name', 'position', 'optimistic', 'points']].rename(columns={'optimistic': 'projection'}))
+            team_dfs.append(pd.DataFrame(starters)[
+                            ['position', 'player_name', 'optimistic', 'points']])
+            team_names.append(user_display_name)
+            team_scores.append(optimistic_score)
+            starters_list.append(starters)
+
+        # Build table rows in the order of starters for each team
+        max_starters = max(len(starters_list[0]), len(starters_list[1]))
+        table_rows = []
+        for i in range(max_starters):
+            row = []
+            for team_idx in range(2):
+                if i < len(starters_list[team_idx]):
+                    starter = starters_list[team_idx][i]
+                    player = starter['player_name']
+                    proj = starter['optimistic']
+                    pts = starter['points']
+                    pos = starter['position']
+                else:
+                    player, proj, pts, pos = '', '', '', ''
+                row.extend(
+                    [player, f"{proj:.2f}" if proj != '' else '', f"{pts:.2f}" if pts != '' else ''])
+            # Insert position from first team (or second if first is empty)
+            row.insert(3, starters_list[0][i]['position'] if i < len(starters_list[0]) else (
+                starters_list[1][i]['position'] if i < len(starters_list[1]) else ''))
+            table_rows.append(row)
+
+        # Build HTML table
+        html = "<table style='width:100%; border-collapse:collapse;'>"
+        # Top row: team names and scores, spanning 3 columns each
+        html += "<tr>"
+        html += f"<th colspan='3' style='text-align:center;'>{team_names[0]}<br><span style='font-weight:normal;'>Projected: {team_scores[0]:.2f}</span></th>"
+        html += "<th></th>"
+        html += f"<th colspan='3' style='text-align:center;'>{team_names[1]}<br><span style='font-weight:normal;'>Projected: {team_scores[1]:.2f}</span></th>"
+        html += "</tr>"
+        # Table body, no header
+        for row in table_rows:
+            html += "<tr>"
+            for i, cell in enumerate(row):
+                style = "padding:4px; border:1px solid #ddd;"
+                # Highlight if projection != points
+                if i in [2, 6] and row[i] != row[i-1] and row[i] != '':
+                    style += "background-color:#ffeeba;"
+                html += f"<td style='{style}'>{cell}</td>"
+            html += "</tr>"
+        html += "</table>"
+
+        st.markdown(html, unsafe_allow_html=True)
