@@ -47,7 +47,6 @@ else:
 
     def get_optimistic_score(df):
         # Only consider players who played or have a projection
-        st.dataframe(df)
         df = df.copy()
         df['optimistic'] = df.apply(
             lambda row: row['points'] if row['game_played'] else row['projection'], axis=1
