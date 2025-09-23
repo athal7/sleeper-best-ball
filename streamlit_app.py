@@ -11,7 +11,8 @@ schedule = nfl.import_schedules([season])
 
 username = st.session_state.get('username')
 locked_league_id = st.query_params.get('league')
-league_id = st.session_state.get('league', {}).get('league_id') or locked_league_id
+league_id = st.session_state.get('league', {}).get(
+    'league_id') or locked_league_id
 week = st.session_state.get('selected_week', utils.current_week(schedule))
 
 
@@ -25,7 +26,7 @@ if locked_league_id is None:
             st.selectbox(
                 "Select a league:",
                 leagues,
-                format_func=lambda l: l['name'], 
+                format_func=lambda l: l['name'],
                 key='league')
         else:
             st.warning("No leagues found for this user.")
@@ -60,9 +61,16 @@ if league_id:
             projection = player_projection.get('pts_ppr')
             if player['position'] == 'TE' and projection is not None:
                 projection += player_projection.get('rec', 0) * 0.5
+            # Format name as first initial + last name
+            full_name = player.get('full_name', '')
+            name_parts = full_name.split()
+            if len(name_parts) >= 2:
+                display_name = f"{name_parts[0][0]}. {name_parts[-1]}"
+            else:
+                display_name = full_name
             players.append({
                 "player_id": player_id,
-                "player_name": player['full_name'],
+                "player_name": display_name,
                 "user_id": user_id,
                 "position": player.get('position'),
                 "points": points,
