@@ -10,7 +10,7 @@ season = int(st.query_params.get('season', datetime.now().year))
 schedule = nfl.import_schedules([season])
 
 league_id = st.query_params.get('league', None)
-week = int(st.query_params.get('week', current_week(schedule)))
+week = int(st.session_state.selected_week or st.query_params.get('week') or current_week(schedule))
 
 if league_id is None:
     username = st.text_input("Enter your Sleeper username:")
@@ -21,7 +21,7 @@ if league_id is None:
             selected_league_id = st.selectbox(
                 "Select a league:",
                 leagues,
-                format_func=lambda l: l['name'])['league_id']
+                format_func=lambda l: l['name'], key='selected_league')['league_id']
             if selected_league_id:
                 if st.button("Select this league"):
                     st.query_params.league = selected_league_id
@@ -33,10 +33,8 @@ else:
     st.subheader(league.get_league_name())
     st.write(f"League ID: {league_id}")
 
-    def set_week():
-        st.query_params.week = st.session_state.selected_week
     st.number_input("Enter the week number:", min_value=1, max_value=18,
-                    value=week, on_change=set_week, key="selected_week")
+                    value=week, key="selected_week")
     stats = Stats()
     week_projections = stats.get_week_projections("regular", season, week)
 
