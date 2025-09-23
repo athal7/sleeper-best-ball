@@ -5,30 +5,33 @@ import nfl_data_py as nfl
 from datetime import datetime
 import utils
 
-st.title("Sleeper Best Ball Outcome Predictor 🏈")
+st.title("Sleeper Best Ball 🏈")
 season = int(st.query_params.get('season', datetime.now().year))
 schedule = nfl.import_schedules([season])
 
-league_id = st.query_params.get('league', None)
+username = st.session_state.get('username')
+locked_league_id = st.query_params.get('league')
+league_id = st.session_state.get('league', {}).get('league_id') or locked_league_id
 week = st.session_state.get('selected_week', utils.current_week(schedule))
 
-if league_id is None:
-    username = st.text_input("Enter your Sleeper username:")
-    if username:
+
+if locked_league_id is None:
+    st.text_input("Enter your Sleeper username:", key='username')
+
+    if username and not locked_league_id:
         user = User(username)
         leagues = user.get_all_leagues('nfl', season)
         if leagues:
-            selected_league_id = st.selectbox(
+            st.selectbox(
                 "Select a league:",
                 leagues,
-                format_func=lambda l: l['name'], key='selected_league')['league_id']
-            if selected_league_id:
-                if st.button("Select this league"):
-                    st.query_params.league = selected_league_id
-                    st.rerun()
+                format_func=lambda l: l['name'], 
+                key='league')
         else:
             st.warning("No leagues found for this user.")
-else:
+
+
+if league_id:
     league = League(league_id)
     st.subheader(league.get_league_name())
     st.write(f"League ID: {league_id}")
