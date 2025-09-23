@@ -112,15 +112,14 @@ if league_id:
                 if i < len(starters_list[team_idx]):
                     starter = starters_list[team_idx][i]
                     player = starter['player_name']
-                    proj = starter['optimistic']
-                    pts = starter['points']
+                    pts = starter['optimistic']
                     pos = starter['position']
                 else:
-                    player, proj, pts, pos = '', '', '', ''
+                    player, pts, pos = '', '', ''
                 row.extend(
-                    [player, f"{proj:.2f}" if proj != '' else '', f"{pts:.2f}" if pts != '' else ''])
+                    [player, f"{pts:.2f}" if pts != '' else ''])
             # Insert position from first team (or second if first is empty)
-            row.insert(3, starters_list[0][i]['position'] if i < len(starters_list[0]) else (
+            row.insert(2, starters_list[0][i]['position'] if i < len(starters_list[0]) else (
                 starters_list[1][i]['position'] if i < len(starters_list[1]) else ''))
             table_rows.append(row)
 
@@ -128,18 +127,29 @@ if league_id:
         html = "<table style='width:100%; border-collapse:collapse;'>"
         # Top row: team names and scores, spanning 3 columns each
         html += "<tr>"
-        html += f"<th colspan='3' style='text-align:center;'>{team_names[0]}<br><span style='font-weight:normal;'>Projected: {team_scores[0]:.2f}</span></th>"
-        html += "<th></th>"
-        html += f"<th colspan='3' style='text-align:center;'>{team_names[1]}<br><span style='font-weight:normal;'>Projected: {team_scores[1]:.2f}</span></th>"
+        html += f"<th colspan='2' style='text-align:center;'>{team_names[0]}<br><span style='font-weight:normal;'>Projected: {team_scores[0]:.2f}</span></th>"
+        html += "<th style='background-color: #eee;'></th>"
+        html += f"<th colspan='2' style='text-align:center;'>{team_names[1]}<br><span style='font-weight:normal;'>Projected: {team_scores[1]:.2f}</span></th>"
         html += "</tr>"
         # Table body, no header
-        for row in table_rows:
+        for row_idx, row in enumerate(table_rows):
             html += "<tr>"
             for i, cell in enumerate(row):
                 style = "padding:4px; border:1px solid #ddd;"
-                # Highlight if projection != points
-                if i in [2, 6] and row[i] != row[i-1] and row[i] != '':
-                    style += "background-color:#ffeeba;"
+                # Highlight player's score if game is not yet over
+                # Player score columns: 1 and 5
+                if i in [1, 4]:
+                    # Find corresponding starter info
+                    team_idx = 0 if i == 1 else 1
+                    if row[i] != '':
+                        # starters_list[team_idx][row_idx] exists if i < len(starters_list[team_idx])
+                        if row_idx < len(starters_list[team_idx]):
+                            if not starters_list[team_idx][row_idx]['game_played']:
+                                style += "background-color:#ffeeba;"
+                if i in [1, 2, 4]:
+                    style += "text-align:center;"
+                if i == 2:
+                    style += "background-color: #eee;"
                 html += f"<td style='{style}'>{cell}</td>"
             html += "</tr>"
         html += "</table>"
