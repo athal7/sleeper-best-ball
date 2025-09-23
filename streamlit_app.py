@@ -10,8 +10,7 @@ season = int(st.query_params.get('season', datetime.now().year))
 schedule = nfl.import_schedules([season])
 
 league_id = st.query_params.get('league', None)
-week = int(st.session_state.selected_week or st.query_params.get(
-    'week') or utils.current_week(schedule))
+week = st.session_state.get('selected_week', utils.current_week(schedule))
 
 if league_id is None:
     username = st.text_input("Enter your Sleeper username:")
