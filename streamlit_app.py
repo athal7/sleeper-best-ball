@@ -88,13 +88,17 @@ else:
         for player_id, points in matchup['players_points'].items():
             player = all_players.get(player_id, {})
             player_stats = week_stats.get(player_id, {})
+            player_projection = week_projections.get(player_id, {})
+            projection = player_projection.get('pts_ppr')
+            if player['position'] == 'TE' and projection is not None:
+                projection += player_projection.get('rec', 0) * 0.5
             players.append({
                     "player_id": player_id,
                     "player_name": player['full_name'],
                     "user_id": user_id,
                     "position": player.get('position'),
                     "points": points,
-                    "projection": week_projections.get(player_id, {}).get('pts_ppr'),
+                    "projection": projection,
                     "game_played": player_stats.get('gp', 0),
                 })
                 
