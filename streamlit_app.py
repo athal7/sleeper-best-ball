@@ -57,13 +57,19 @@ if league_id:
         lambda row: row['players_points'].get(row.name, None), axis=1)
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
+    df['game_played'] = False
     df['game_played'] = df.apply(lambda row: schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
-        (schedule['home_team'] == row['team']) | (schedule['away_team'] == row['team']))]['result'].notnull().values, axis=1)
+        (schedule['home_team'] == row['team']) | (schedule['away_team'] == row['team']))]['result'].notnull().values, axis=1).astype(bool)
     df['projection'] = projections['pts_ppr']
     df.loc[df['position'] == 'TE',
            'projection'] += projections['rec'] * 0.5
-    df['optimistic'] = df.apply(lambda row: row['points'] if row['game_played'] else max(
-        row['points'], row['projection']), axis=1)
+    df['optimistic'] = df.apply(
+        lambda row: row['points'] if (
+            hasattr(row['game_played'],
+                    'size') and row['game_played'] and row['points']
+        ) else max(row['points'] or 0.0, row['projection'] or 0.0),
+        axis=1
+    )
     df = df.sort_values('optimistic', ascending=False)
 
     st.header("Matchups")
@@ -109,6 +115,7 @@ if league_id:
 
     def team_name(team_id):
         return rosters.loc[team_id, 'display_name']
+
     def team_score(team_id):
         return df[(df['roster_id'] == team_id) & (df['spos'].notnull())]['optimistic'].sum()
 
@@ -136,4 +143,3 @@ if league_id:
             html += "</tr>"
         html += "</tbody></table>"
         st.markdown(html, unsafe_allow_html=True)
-            
