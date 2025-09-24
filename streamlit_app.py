@@ -3,17 +3,15 @@ import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players
 import nfl_data_py as nfl
 from datetime import datetime
-import utils
 
 st.title("Sleeper Best Ball 🏈")
 season = int(st.query_params.get('season', datetime.now().year))
-schedule = nfl.import_schedules([season])
+
 
 username = st.session_state.get('username')
 locked_league_id = st.query_params.get('league')
 league_id = st.session_state.get('league', {}).get(
     'league_id') or locked_league_id
-week = st.session_state.get('selected_week', utils.current_week(schedule))
 
 
 if locked_league_id is None:
@@ -34,124 +32,108 @@ if locked_league_id is None:
 
 if league_id:
     league = League(league_id)
+    users = pd.DataFrame(league.get_users()).set_index('user_id')[[
+        'display_name']]
+    rosters = pd.DataFrame(league.get_rosters()).set_index(
+        'roster_id').join(users, on='owner_id')
+    stats = Stats()
+
+    all_players = pd.DataFrame.from_dict(
+        Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
+    schedule = pd.DataFrame(nfl.import_schedules([season]))
+    week = st.session_state.get(
+        'selected_week', schedule[schedule['result'].isnull()]['week'].min())
+    projections = pd.DataFrame.from_dict(
+        stats.get_week_projections("regular", season, week), orient='index')
+
     st.subheader(league.get_league_name())
     st.write(f"League ID: {league_id}")
-
     st.number_input("Enter the week number:", min_value=1, max_value=18,
                     value=week, key="selected_week")
-    stats = Stats()
-    week_projections = stats.get_week_projections("regular", season, week)
 
-    matchups = league.get_matchups(week)
-    all_players = Players().get_all_players("nfl")
-    rosters = league.get_rosters()
-    users = league.get_users()
+    df = pd.DataFrame(league.get_matchups(week)).explode('players').rename(
+        columns={'players': 'player_id'}).set_index('player_id')
+    df['points'] = df.apply(
+        lambda row: row['players_points'].get(row.name, None), axis=1)
+    df = df[['points', 'roster_id', 'matchup_id']]
+    df = df.join(all_players, how='left')
+    df['game_played'] = df.apply(lambda row: schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
+        (schedule['home_team'] == row['team']) | (schedule['away_team'] == row['team']))]['result'].notnull().values, axis=1)
+    df['projection'] = projections['pts_ppr']
+    df.loc[df['position'] == 'TE',
+           'projection'] += projections['rec'] * 0.5
+    df['optimistic'] = df.apply(lambda row: row['points'] if row['game_played'] else max(
+        row['points'], row['projection']), axis=1)
+    df = df.sort_values('optimistic', ascending=False)
 
-    players = []
-    matchup_dict = {}
-    for matchup in matchups:
-        matchup_id = matchup['matchup_id']
-        user_id = rosters[matchup['roster_id']-1].get("owner_id")
-        if matchup_id not in matchup_dict:
-            matchup_dict[matchup_id] = []
-        matchup_dict[matchup_id].append(user_id)
-        for player_id, points in matchup['players_points'].items():
-            player = all_players.get(player_id, {})
-            player_projection = week_projections.get(player_id, {})
-            projection = player_projection.get('pts_ppr')
-            if player['position'] == 'TE' and projection is not None:
-                projection += player_projection.get('rec', 0) * 0.5
-            # Format name as first initial + last name
-            full_name = player.get('full_name', '')
-            name_parts = full_name.split()
-            if len(name_parts) >= 2:
-                display_name = f"{name_parts[0][0]}. {name_parts[-1]}"
-            else:
-                display_name = full_name
-            players.append({
-                "player_id": player_id,
-                "player_name": display_name,
-                "user_id": user_id,
-                "position": player.get('position'),
-                "points": points,
-                "projection": projection,
-                "game_played": utils.is_game_over(schedule, week, player.get('team'))
-            })
-
-    players_df = pd.DataFrame(players)
-    users_df = pd.DataFrame(users)
     st.header("Matchups")
-    for matchup_id, user_ids in matchup_dict.items():
-        # Only support 2-team matchups for this table format
-        if len(user_ids) != 2:
-            st.warning("Only 2-team matchups are supported for this view.")
-            continue
+    for roster_id in df['roster_id'].unique():
+        qb = df[(df['roster_id'] == roster_id) &
+                (df['position'] == 'QB')].head(1)
+        df.loc[qb.index, 'spos'] = 'QB'
 
-        team_dfs = []
-        team_names = []
-        team_scores = []
-        starters_list = []
-        for user_id in user_ids:
-            team_df = players_df[players_df['user_id'] == user_id]
-            optimistic_score, starters = utils.calculate_optimistic_starters(
-                team_df)
-            user_display_name = users_df.loc[users_df['user_id']
-                                             == user_id, 'display_name'].values[0]
-            team_dfs.append(pd.DataFrame(starters)[
-                            ['position', 'player_name', 'optimistic', 'points']])
-            team_names.append(user_display_name)
-            team_scores.append(optimistic_score)
-            starters_list.append(starters)
+        rbs = df[(df['roster_id'] == roster_id) &
+                 (df['position'] == 'RB')].head(3)
+        df.loc[rbs.index, 'spos'] = ['RB1', 'RB2', 'RB3'][:len(rbs)]
 
-        # Build table rows in the order of starters for each team
-        max_starters = max(len(starters_list[0]), len(starters_list[1]))
-        table_rows = []
-        for i in range(max_starters):
-            row = []
-            for team_idx in range(2):
-                if i < len(starters_list[team_idx]):
-                    starter = starters_list[team_idx][i]
-                    player = starter['player_name']
-                    pts = starter['optimistic']
-                    pos = starter['position']
-                else:
-                    player, pts, pos = '', '', ''
-                row.extend(
-                    [player, f"{pts:.2f}" if pts != '' else ''])
-            # Insert position from first team (or second if first is empty)
-            row.insert(2, starters_list[0][i]['position'] if i < len(starters_list[0]) else (
-                starters_list[1][i]['position'] if i < len(starters_list[1]) else ''))
-            table_rows.append(row)
+        wrs = df[(df['roster_id'] == roster_id) &
+                 (df['position'] == 'WR')].head(3)
+        df.loc[wrs.index, 'spos'] = ['WR1', 'WR2', 'WR3'][:len(wrs)]
 
-        # Build HTML table
-        html = "<table style='width:100%; border-collapse:collapse;'>"
-        # Top row: team names and scores, spanning 3 columns each
-        html += "<tr>"
-        html += f"<th colspan='2' style='text-align:center;'>{team_names[0]}<br><span style='font-weight:normal;'>Projected: {team_scores[0]:.2f}</span></th>"
-        html += "<th style='background-color: #eee;'></th>"
-        html += f"<th colspan='2' style='text-align:center;'>{team_names[1]}<br><span style='font-weight:normal;'>Projected: {team_scores[1]:.2f}</span></th>"
-        html += "</tr>"
-        # Table body, no header
-        for row_idx, row in enumerate(table_rows):
+        tes = df[(df['roster_id'] == roster_id) &
+                 (df['position'] == 'TE')].head(2)
+        df.loc[tes.index, 'spos'] = ['TE1', 'TE2'][:len(tes)]
+
+        flex = df[
+            (df['roster_id'] == roster_id) &
+            (df['position'].isin(['RB', 'WR', 'TE'])) &
+            (df['spos'].isnull())].head(1)
+        df.loc[flex.index, 'spos'] = 'FLEX'
+
+        sflex = df[(df['roster_id'] == roster_id) &
+                   (df['spos'].isnull())].head(1)
+        df.loc[sflex.index, 'spos'] = 'SFLEX'
+
+    matchups = df['matchup_id'].nunique()
+    starters = ['QB', 'RB1', 'RB2', 'RB3', 'WR1',
+                'WR2', 'WR3', 'TE1', 'TE2', 'FLEX', 'SFLEX']
+
+    def player_name(row):
+        return f"{row['first_name'][0]}. {row['last_name']}"
+
+    def score(row):
+        if row['game_played']:
+            return f"{row['optimistic']:.2f}"
+        else:
+            return f"<em>{row['optimistic']:.2f}</em>"
+
+    def team_name(team_id):
+        return rosters.loc[team_id, 'display_name']
+    def team_score(team_id):
+        return df[(df['roster_id'] == team_id) & (df['spos'].notnull())]['optimistic'].sum()
+
+    for matchup in range(1, matchups + 1):
+        team1, team2 = df[df['matchup_id'] == matchup]['roster_id'].unique()
+        html = "<table style='width: 100%; max-width: 800px'><thead><tr>"
+        html += f"<th>{team_name(team1)}</th>"
+        html += f"<th>{team_score(team1):.2f}</th>"
+        html += "<th></th>"
+        html += f"<th>{team_name(team2)}</th>"
+        html += f"<th>{team_score(team2):.2f}</th>"
+        html += "</tr></thead><tbody>"
+
+        for pos in starters:
+            p1 = df[(df['roster_id'] == team1) & (
+                df['spos'] == pos)].iloc[0].to_dict()
+            p2 = df[(df['roster_id'] == team2) & (
+                df['spos'] == pos)].iloc[0].to_dict()
             html += "<tr>"
-            for i, cell in enumerate(row):
-                style = "padding:4px; border:1px solid #ddd;"
-                # Highlight player's score if game is not yet over
-                # Player score columns: 1 and 5
-                if i in [1, 4]:
-                    # Find corresponding starter info
-                    team_idx = 0 if i == 1 else 1
-                    if row[i] != '':
-                        # starters_list[team_idx][row_idx] exists if i < len(starters_list[team_idx])
-                        if row_idx < len(starters_list[team_idx]):
-                            if not starters_list[team_idx][row_idx]['game_played']:
-                                style += "background-color:#ffeeba;"
-                if i in [1, 2, 4]:
-                    style += "text-align:center;"
-                if i == 2:
-                    style += "background-color: #eee;"
-                html += f"<td style='{style}'>{cell}</td>"
+            html += f"<td>{player_name(p1)}</td>"
+            html += f"<td>{score(p1)}</td>"
+            html += f"<td align='center'>{pos}</td>"
+            html += f"<td>{score(p2)}</td>"
+            html += f"<td>{player_name(p2)}</td>"
             html += "</tr>"
-        html += "</table>"
-
+        html += "</tbody></table>"
         st.markdown(html, unsafe_allow_html=True)
+            
