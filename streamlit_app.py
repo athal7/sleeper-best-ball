@@ -58,7 +58,7 @@ if league_id:
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
     df['game_played'] = False
-    
+
     def game(row):
         team = row['team']
         game = schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
@@ -70,13 +70,15 @@ if league_id:
     df['projection'] = projections['pts_ppr']
     df.loc[df['position'] == 'TE',
            'projection'] += projections['rec'] * 0.5
-    df['optimistic'] = df.apply(
-        lambda row: row['points'] if (
-            hasattr(row['game_played'],
-                    'size') and row['game_played'] and row['points']
-        ) else max(row['points'] or 0.0, row['projection'] or 0.0),
-        axis=1
-    )
+
+    def optimistic_score(row):
+        if row['game_played'] and row['points'] is not None:
+            return row['points']
+        elif row['projection'] is not None:
+            return row['projection']
+        else:
+            return 0.0
+    df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
     st.header("Matchups")
