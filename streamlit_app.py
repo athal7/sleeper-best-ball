@@ -58,8 +58,15 @@ if league_id:
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
     df['game_played'] = False
-    df['game_played'] = df.apply(lambda row: schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
-        (schedule['home_team'] == row['team']) | (schedule['away_team'] == row['team']))]['result'].notnull().values, axis=1).astype(bool)
+    
+    def game(row):
+        team = row['team']
+        game = schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
+            (schedule['home_team'] == team) | (schedule['away_team'] == team))]
+        if not game.empty:
+            return game['result'].notnull().values[0]
+        return False
+    df['game_played'] = df.apply(game, axis=1)
     df['projection'] = projections['pts_ppr']
     df.loc[df['position'] == 'TE',
            'projection'] += projections['rec'] * 0.5
