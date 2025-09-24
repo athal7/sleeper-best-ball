@@ -130,7 +130,7 @@ if league_id:
 
     for matchup in range(1, matchups + 1):
         team1, team2 = df[df['matchup_id'] == matchup]['roster_id'].unique()
-        html = "<table style='width: 100%; max-width: 800px'><thead><tr>"
+        html = "<table style='margin: 20px auto; max-width: 800px; text-align: center; '><thead><tr>"
         html += f"<th>{team_name(team1)}</th>"
         html += f"<th>{team_score(team1):.2f}</th>"
         html += "<th></th>"
