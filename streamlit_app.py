@@ -120,7 +120,7 @@ if league_id:
         if row['game_played']:
             return f"{row['optimistic']:.2f}"
         else:
-            return f"<em>{row['optimistic']:.2f}</em>"
+            return f"*{row['optimistic']:.2f}*"
 
     def team_name(team_id):
         return rosters.loc[team_id, 'display_name']
@@ -130,25 +130,23 @@ if league_id:
 
     for matchup in range(1, matchups + 1):
         team1, team2 = df[df['matchup_id'] == matchup]['roster_id'].unique()
-        html = "<table style='margin: 20px auto; max-width: 800px; text-align: center; '><thead><tr>"
-        html += f"<th>{team_name(team1)}</th>"
-        html += f"<th>{team_score(team1):.2f}</th>"
-        html += "<th></th>"
-        html += f"<th>{team_name(team2)}</th>"
-        html += f"<th>{team_score(team2):.2f}</th>"
-        html += "</tr></thead><tbody>"
-
+        headers = [
+            team_name(team1),
+            f"{team_score(team1):.2f}",
+            f"{team_score(team2):.2f}",
+            team_name(team2)
+        ]
+        table_data = []
         for pos in starters:
             p1 = df[(df['roster_id'] == team1) & (
                 df['spos'] == pos)].iloc[0].to_dict()
             p2 = df[(df['roster_id'] == team2) & (
                 df['spos'] == pos)].iloc[0].to_dict()
-            html += "<tr>"
-            html += f"<td>{player_name(p1)}</td>"
-            html += f"<td>{score(p1)}</td>"
-            html += f"<td align='center'>{pos}</td>"
-            html += f"<td>{score(p2)}</td>"
-            html += f"<td>{player_name(p2)}</td>"
-            html += "</tr>"
-        html += "</tbody></table>"
-        st.markdown(html, unsafe_allow_html=True)
+            table_data.append([
+                player_name(p1),
+                score(p1),
+                score(p2),
+                player_name(p2)
+            ])
+        matchup_df = pd.DataFrame(table_data, columns=headers, index=starters)
+        st.table(matchup_df)
