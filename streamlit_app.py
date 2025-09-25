@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players, get_sport_state
 import nfl_data_py as nfl
-from streamlit_extras import buy_me_a_coffee, bottom_container, floating_button
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown("*Sleeper predictions are misleading for best ball scoring, so I built this app*")
