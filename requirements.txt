@@ -2,3 +2,4 @@ streamlit==1.49.0
 git+https://github.com/dtsong/sleeper-api-wrapper.git
 pandas
 nfl_data_py
+streamlit-extras
