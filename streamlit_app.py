@@ -163,6 +163,6 @@ if league_id:
                 score(p2),
                 player_name(p2)
             ])
-        matchup_df = pd.DataFrame(table_data, columns=headers, index=starters)
+        matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(index={'SUPER_FLEX': 'SFLEX'})
         st.table(matchup_df)
     buy_me_a_coffee.button(username='athal7', floating=False)
