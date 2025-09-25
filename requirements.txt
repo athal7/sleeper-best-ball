@@ -1,4 +1,4 @@
 streamlit==1.49.0
-sleeper-api-wrapper
+git+https://github.com/dtsong/sleeper-api-wrapper.git
 pandas
 nfl_data_py

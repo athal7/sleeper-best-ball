@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
-from sleeper_wrapper import League, User, Stats, Players
+from sleeper_wrapper import League, User, Stats, Players, get_sport_state
 import nfl_data_py as nfl
-from datetime import datetime
 
 st.title("Sleeper Best Ball 🏈")
-season = int(st.query_params.get('season', datetime.now().year))
+current = get_sport_state('nfl')
+season = int(current['league_season'])
+week = int(current['display_week'])
 
 
 username = st.session_state.get('username')
@@ -41,16 +42,12 @@ if league_id:
     all_players = pd.DataFrame.from_dict(
         Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
     schedule = pd.DataFrame(nfl.import_schedules([season]))
-    week = st.session_state.get(
-        'selected_week', schedule[schedule['result'].isnull()]['week'].min())
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
 
     st.subheader(league.get_league_name())
     st.write(f"League ID: {league_id}")
-    st.number_input("Enter the week number:", min_value=1, max_value=18,
-                    value=week, key="selected_week")
-
+    
     df = pd.DataFrame(league.get_matchups(week)).explode('players').rename(
         columns={'players': 'player_id'}).set_index('player_id')
     df['points'] = df.apply(
@@ -83,7 +80,7 @@ if league_id:
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
-    st.header("Matchups")
+    st.header(f"Week {week} Matchups")
     for roster_id in df['roster_id'].unique():
         qb = df[(df['roster_id'] == roster_id) &
                 (df['position'] == 'QB')].head(1)
