@@ -8,7 +8,6 @@ current = get_sport_state('nfl')
 season = int(current['league_season'])
 week = int(current['display_week'])
 
-
 username = st.session_state.get('username')
 locked_league_id = st.query_params.get('league')
 league_id = st.session_state.get('league', {}).get(
@@ -33,6 +32,9 @@ if locked_league_id is None:
 
 if league_id:
     league = League(league_id)
+    league_info = league.get_league()
+    scoring = league_info['scoring_settings']
+
     users = pd.DataFrame(league.get_users()).set_index('user_id')[[
         'display_name']]
     rosters = pd.DataFrame(league.get_rosters()).set_index(
@@ -44,10 +46,9 @@ if league_id:
     schedule = pd.DataFrame(nfl.import_schedules([season]))
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
-
     st.subheader(league.get_league_name())
     st.write(f"League ID: {league_id}")
-    
+
     df = pd.DataFrame(league.get_matchups(week)).explode('players').rename(
         columns={'players': 'player_id'}).set_index('player_id')
     df['points'] = df.apply(
@@ -66,9 +67,19 @@ if league_id:
             return game['result'].notnull().values[0]
         return False
     df['game_played'] = df.apply(game, axis=1)
-    df['projection'] = projections['pts_ppr']
-    df.loc[df['position'] == 'TE',
-           'projection'] += projections['rec'] * 0.5
+
+    def compute_projection(row):
+        pid = row.name
+        if pid not in projections.index:
+            return None
+        proj = projections.loc[pid]
+        total = 0.0
+        for stat, pts in league_info['scoring_settings'].items():
+            if stat in proj and pd.notnull(proj[stat]):
+                total += proj[stat] * pts
+        return total if total != 0.0 else None
+
+    df['projection'] = df.apply(compute_projection, axis=1)
 
     def optimistic_score(row):
         if row['game_played'] and row['points'] is not None:
