@@ -61,6 +61,8 @@ if league_id:
 
     def game(row):
         team = row['team']
+        if team == "LAR":
+            team = "LA"
         game = schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
             (schedule['home_team'] == team) | (schedule['away_team'] == team))]
         if not game.empty:
