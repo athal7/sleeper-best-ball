@@ -9,29 +9,27 @@ current = get_sport_state('nfl')
 season = int(current['league_season'])
 week = int(current['display_week'])
 
-username = st.session_state.get('username')
+username = st.query_params.get('username')
 locked_league_id = st.query_params.get('league')
-league_id = st.session_state.get('league', {}).get(
-    'league_id') or locked_league_id
+leagues = []
 
-
-if locked_league_id is None:
-    st.text_input("Enter your Sleeper username:", key='username')
+if locked_league_id:
+    leagues = [locked_league_id]
+    if username:
+        st.button("Clear League Filter",
+                  on_click=lambda: st.query_params.pop('league', None))
+else:
+    st.text_input("Enter your Sleeper username:", key='username_input',
+                  on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
 
     if username and not locked_league_id:
         user = User(username)
-        leagues = user.get_all_leagues('nfl', season)
-        if leagues:
-            st.selectbox(
-                "Select a league:",
-                leagues,
-                format_func=lambda l: l['name'],
-                key='league')
-        else:
+        leagues = [l['league_id'] for l in user.get_all_leagues('nfl', season)]
+        if not leagues:
             st.warning("No leagues found for this user.")
 
 
-if league_id:
+for league_id in leagues:
     league = League(league_id)
     league_info = league.get_league()
 
@@ -46,8 +44,6 @@ if league_id:
     schedule = pd.DataFrame(nfl.import_schedules([season]))
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
-    st.subheader(league.get_league_name())
-    st.write(f"League ID: {league_id}")
 
     df = pd.DataFrame(league.get_matchups(week)).explode('players').rename(
         columns={'players': 'player_id'}).set_index('player_id')
@@ -116,14 +112,14 @@ if league_id:
     positions = positions[positions['starting_positions'].notnull()].set_index(
         'starting_positions')
 
-    st.header(f"Week {week} Matchups")
+    st.subheader(f" {league.get_league_name()}: Week {week}")
     df['spos'] = None
     for roster_id in df['roster_id'].unique():
         for spos, eligible in positions.iterrows():
             starter = df.loc[(df['roster_id'] == roster_id) & (df['position'].isin(eligible['eligible_positions'])) & (
                 df['spos'].isnull()), 'spos'].head(1).index
             df.loc[starter, 'spos'] = spos
-            
+
     df = df[df['spos'].notnull()]
 
     def player_name(row):
@@ -137,7 +133,7 @@ if league_id:
 
     def team_name(team_id):
         return rosters.loc[team_id, 'display_name']
-    
+
     def team_score(team_id):
         return df[(df['roster_id'] == team_id) & (df['spos'].notnull())]['optimistic'].sum()
 
@@ -145,6 +141,8 @@ if league_id:
     starters = positions.index.tolist()
     for matchup in range(1, matchups + 1):
         team1, team2 = df[df['matchup_id'] == matchup]['roster_id'].unique()
+        if not locked_league_id and username and username not in [team_name(team1), team_name(team2)]:
+            continue
         headers = [
             team_name(team1),
             f"{team_score(team1):.2f}",
@@ -163,6 +161,10 @@ if league_id:
                 score(p2),
                 player_name(p2)
             ])
-        matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(index={'SUPER_FLEX': 'SFLEX'})
+        matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(
+            index={'SUPER_FLEX': 'SFLEX'})
         st.table(matchup_df)
+    if not locked_league_id:
+        st.button("View All Matchups", on_click=lambda: st.query_params.update(
+            {'league': league_id}))
     buy_me_a_coffee.button(username='athal7', floating=False)
