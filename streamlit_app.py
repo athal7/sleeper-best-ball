@@ -34,7 +34,6 @@ if locked_league_id is None:
 if league_id:
     league = League(league_id)
     league_info = league.get_league()
-    scoring = league_info['scoring_settings']
 
     users = pd.DataFrame(league.get_users()).set_index('user_id')[[
         'display_name']]
@@ -56,7 +55,6 @@ if league_id:
         lambda row: row['players_points'].get(row.name, None), axis=1)
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
-    df['game_played'] = False
 
     def game(row):
         team = row['team']
@@ -79,7 +77,6 @@ if league_id:
             if stat in proj and pd.notnull(proj[stat]):
                 total += proj[stat] * pts
         return total if total != 0.0 else None
-
     df['projection'] = df.apply(compute_projection, axis=1)
 
     def optimistic_score(row):
@@ -92,37 +89,42 @@ if league_id:
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
+    positions = [
+        ['QB', ['QB']],
+        ['RB', ['RB']],
+        ['WR', ['WR']],
+        ['TE', ['TE']],
+        ['FLEX', ['RB', 'WR', 'TE']],
+        ['SUPER_FLEX', ['QB', 'RB', 'WR', 'TE']],
+        ['K', ['K']],
+        ['DEF', ['DEF']]
+    ]
+    positions = pd.DataFrame(
+        positions, columns=['position', 'eligible_positions']).set_index('position')
+
+    def make_starting_positions(row):
+        pos = row.name
+        cnt = league_info['roster_positions'].count(pos)
+        if cnt == 1:
+            return [pos]
+        else:
+            return [f"{pos}{i+1}" for i in range(cnt)]
+    positions['starting_positions'] = positions.apply(
+        make_starting_positions, axis=1)
+
+    positions = positions.explode('starting_positions')
+    positions = positions[positions['starting_positions'].notnull()].set_index(
+        'starting_positions')
+
     st.header(f"Week {week} Matchups")
+    df['spos'] = None
     for roster_id in df['roster_id'].unique():
-        qb = df[(df['roster_id'] == roster_id) &
-                (df['position'] == 'QB')].head(1)
-        df.loc[qb.index, 'spos'] = 'QB'
-
-        rbs = df[(df['roster_id'] == roster_id) &
-                 (df['position'] == 'RB')].head(3)
-        df.loc[rbs.index, 'spos'] = ['RB1', 'RB2', 'RB3'][:len(rbs)]
-
-        wrs = df[(df['roster_id'] == roster_id) &
-                 (df['position'] == 'WR')].head(3)
-        df.loc[wrs.index, 'spos'] = ['WR1', 'WR2', 'WR3'][:len(wrs)]
-
-        tes = df[(df['roster_id'] == roster_id) &
-                 (df['position'] == 'TE')].head(2)
-        df.loc[tes.index, 'spos'] = ['TE1', 'TE2'][:len(tes)]
-
-        flex = df[
-            (df['roster_id'] == roster_id) &
-            (df['position'].isin(['RB', 'WR', 'TE'])) &
-            (df['spos'].isnull())].head(1)
-        df.loc[flex.index, 'spos'] = 'FLEX'
-
-        sflex = df[(df['roster_id'] == roster_id) &
-                   (df['spos'].isnull())].head(1)
-        df.loc[sflex.index, 'spos'] = 'SFLEX'
-
-    matchups = df['matchup_id'].nunique()
-    starters = ['QB', 'RB1', 'RB2', 'RB3', 'WR1',
-                'WR2', 'WR3', 'TE1', 'TE2', 'FLEX', 'SFLEX']
+        for spos, eligible in positions.iterrows():
+            starter = df.loc[(df['roster_id'] == roster_id) & (df['position'].isin(eligible['eligible_positions'])) & (
+                df['spos'].isnull()), 'spos'].head(1).index
+            df.loc[starter, 'spos'] = spos
+            
+    df = df[df['spos'].notnull()]
 
     def player_name(row):
         return f"{row['first_name'][0]}. {row['last_name']}"
@@ -135,10 +137,12 @@ if league_id:
 
     def team_name(team_id):
         return rosters.loc[team_id, 'display_name']
-
+    
     def team_score(team_id):
         return df[(df['roster_id'] == team_id) & (df['spos'].notnull())]['optimistic'].sum()
 
+    matchups = df['matchup_id'].nunique()
+    starters = positions.index.tolist()
     for matchup in range(1, matchups + 1):
         team1, team2 = df[df['matchup_id'] == matchup]['roster_id'].unique()
         headers = [
