@@ -26,10 +26,12 @@ else:
         if not leagues:
             st.warning("No leagues found for this user.")
 
+st.write(f"#### Week {week}")
 
 for league_id in leagues:
     league = League(league_id)
     league_info = league.get_league()
+    st.write(f"###### {league_info['name']}")
 
     users = pd.DataFrame(league.get_users()).set_index('user_id')[[
         'display_name']]
@@ -109,8 +111,7 @@ for league_id in leagues:
     positions = positions.explode('starting_positions')
     positions = positions[positions['starting_positions'].notnull()].set_index(
         'starting_positions')
-
-    st.subheader(f" {league.get_league_name()}: Week {week}")
+    
     df['spos'] = None
     for roster_id in df['roster_id'].unique():
         for spos, eligible in positions.iterrows():
@@ -166,11 +167,12 @@ for league_id in leagues:
         matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(
             index={'SUPER_FLEX': 'SFLEX'})
         matchup_df
+        st.html("<small style='display:block;float:right;margin-top:0;padding-top:0;margin-bottom:30px;'>* projected</small>")
     if not locked_league_id:
-        st.button("View All League Matchups", on_click=lambda: st.query_params.update(
+        st.button("View League Matchups", on_click=lambda: st.query_params.update(
             {'league': league_id}))
     elif username:
-        st.button("View All My Matchups",
+        st.button("View My Matchups",
                   on_click=lambda: st.query_params.pop('league', None))
     st.divider()
     st.link_button("Submit Feedback",
