@@ -4,7 +4,8 @@ from sleeper_wrapper import League, User, Stats, Players, get_sport_state
 import nfl_data_py as nfl
 
 st.title("Sleeper Best Ball 🏈")
-st.markdown("*Sleeper predictions are misleading for best ball scoring, so I built this app*")
+st.markdown(
+    "*Sleeper predictions are misleading for best ball scoring, so I built this app*")
 current = get_sport_state('nfl')
 season = int(current['league_season'])
 week = int(current['display_week'])
@@ -15,9 +16,6 @@ leagues = []
 
 if locked_league_id:
     leagues = [locked_league_id]
-    if username:
-        st.button("Clear League Filter",
-                  on_click=lambda: st.query_params.pop('league', None))
 else:
     st.text_input("Enter your Sleeper username:", key='username_input',
                   on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
@@ -126,16 +124,20 @@ for league_id in leagues:
         return f"{row['first_name'][0]}. {row['last_name']}"
 
     def score(row):
-        if row['game_played']:
-            return f"{row['optimistic']:.2f}"
-        else:
-            return f"*{row['optimistic']:.2f}*"
+        score = f"{row['optimistic']:.2f}"
+        if not row['game_played']:
+            score += "*"
+        return score
 
     def team_name(team_id):
         return rosters.loc[team_id, 'display_name']
 
     def team_score(team_id):
-        return df[(df['roster_id'] == team_id) & (df['spos'].notnull())]['optimistic'].sum()
+        starters = df[(df['roster_id'] == team_id) & (df['spos'].notnull())]
+        score = f"{starters['optimistic'].sum():.2f}"
+        if not starters['game_played'].all():
+            score += "*"
+        return score
 
     matchups = df['matchup_id'].nunique()
     starters = positions.index.tolist()
@@ -145,8 +147,8 @@ for league_id in leagues:
             continue
         headers = [
             team_name(team1),
-            f"{team_score(team1):.2f}",
-            f"{team_score(team2):.2f}",
+            team_score(team1),
+            team_score(team2),
             team_name(team2)
         ]
         table_data = []
@@ -163,11 +165,15 @@ for league_id in leagues:
             ])
         matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(
             index={'SUPER_FLEX': 'SFLEX'})
-        st.table(matchup_df)
+        matchup_df
     if not locked_league_id:
-        st.button("View All Matchups", on_click=lambda: st.query_params.update(
+        st.button("View All League Matchups", on_click=lambda: st.query_params.update(
             {'league': league_id}))
+    elif username:
+        st.button("View All My Matchups",
+                  on_click=lambda: st.query_params.pop('league', None))
     st.divider()
-    st.link_button("Submit Feedback", "https://github.com/athal7/sleeper-best-ball/issues", icon="✉️")
-    st.link_button("Buy Me A Coffee", "https://buymeacoffee.com/s4m9knqt9vb", icon="☕")
-
+    st.link_button("Submit Feedback",
+                   "https://github.com/athal7/sleeper-best-ball/issues", icon="✉️")
+    st.link_button("Buy Me A Coffee",
+                   "https://buymeacoffee.com/s4m9knqt9vb", icon="☕")
