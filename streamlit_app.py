@@ -79,7 +79,7 @@ for league_id in leagues:
         if row['game_played'] and row['points'] is not None:
             return row['points']
         elif row['projection'] is not None:
-            return row['projection']
+            return max([row['projection'], row['points']])
         else:
             return 0.0
     df['optimistic'] = df.apply(optimistic_score, axis=1)
