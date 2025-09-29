@@ -26,7 +26,8 @@ else:
         if not leagues:
             st.warning("No leagues found for this user.")
 
-st.write(f"#### Week {week}")
+if leagues:
+    st.write(f"#### Week {week}")
 
 for league_id in leagues:
     league = League(league_id)
