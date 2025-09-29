@@ -84,7 +84,7 @@ for league_id in leagues:
         elif row['minutes_remaining'] >= TOTAL_MINS:
             return row['projection'] if row['projection'] is not None else 0.0
         else:
-            return row['points'] * (TOTAL_MINS / row['minutes_remaining'])
+            return row['points'] + (row['points'] * row['minutes_remaining'] / TOTAL_MINS) 
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
