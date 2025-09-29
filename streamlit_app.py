@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players, get_sport_state
-import nfl_data_py as nfl
+import nflreadpy as nfl
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown(
@@ -42,7 +42,7 @@ for league_id in leagues:
 
     all_players = pd.DataFrame.from_dict(
         Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
-    schedule = pd.DataFrame(nfl.import_schedules([season]))
+    pbp = pd.DataFrame(nfl.load_pbp(season).to_pandas())
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
 
@@ -53,16 +53,18 @@ for league_id in leagues:
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
 
-    def game(row):
+    TOTAL_MINS = 60
+    def minutes_remaining(row):
         team = row['team']
         if team == "LAR":
             team = "LA"
-        game = schedule.loc[(schedule['season'] == season) & (schedule['week'] == week) & (
-            (schedule['home_team'] == team) | (schedule['away_team'] == team))]
-        if not game.empty:
-            return game['result'].notnull().values[0]
-        return False
-    df['game_played'] = df.apply(game, axis=1)
+        game = pbp.loc[(pbp['week'] == week) & (
+            (pbp['home_team'] == team) | (pbp['away_team'] == team))]
+        if game.empty:
+            return TOTAL_MINS
+        else:
+            return int(game['game_seconds_remaining'].min() / 60.0)
+    df['minutes_remaining'] = df.apply(minutes_remaining, axis=1)
 
     def compute_projection(row):
         pid = row.name
@@ -77,12 +79,12 @@ for league_id in leagues:
     df['projection'] = df.apply(compute_projection, axis=1)
 
     def optimistic_score(row):
-        if row['game_played'] and row['points'] is not None:
+        if row['minutes_remaining'] <= 0:
             return row['points']
-        elif row['projection'] is not None:
-            return max([row['projection'], row['points']])
+        elif row['minutes_remaining'] >= TOTAL_MINS:
+            return row['projection'] if row['projection'] is not None else 0.0
         else:
-            return 0.0
+            return row['points'] * (TOTAL_MINS / row['minutes_remaining'])
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
@@ -112,7 +114,7 @@ for league_id in leagues:
     positions = positions.explode('starting_positions')
     positions = positions[positions['starting_positions'].notnull()].set_index(
         'starting_positions')
-    
+
     df['spos'] = None
     for roster_id in df['roster_id'].unique():
         for spos, eligible in positions.iterrows():
@@ -127,7 +129,7 @@ for league_id in leagues:
 
     def score(row):
         score = f"{row['optimistic']:.2f}"
-        if not row['game_played']:
+        if row['minutes_remaining'] > 0:
             score += "*"
         return score
 
@@ -137,7 +139,7 @@ for league_id in leagues:
     def team_score(team_id):
         starters = df[(df['roster_id'] == team_id) & (df['spos'].notnull())]
         score = f"{starters['optimistic'].sum():.2f}"
-        if not starters['game_played'].all():
+        if not starters['minutes_remaining'].le(0).all():
             score += "*"
         return score
 
