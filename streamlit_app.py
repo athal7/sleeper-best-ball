@@ -4,7 +4,7 @@ from sleeper_wrapper import League, User, Stats, Players, get_sport_state
 import nflreadpy as nfl
 from nflreadpy.config import update_config
 
-update_config(cache_duration=300)
+update_config(cache_mode="off")
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown(
