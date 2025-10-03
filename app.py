@@ -30,12 +30,12 @@ else:
             st.warning("No leagues found for this user.")
 
 if leagues:
-    st.write(f"#### Week {week}")
+    st.markdown(f"#### Week {week}")
 
 for league_id in leagues:
     league = League(league_id)
     league_info = league.get_league()
-    st.write(f"###### {league_info['name']}")
+    st.markdown(f"###### {league_info['name']}")
 
     users = pd.DataFrame(league.get_users()).set_index('user_id')[[
         'display_name']]
@@ -176,7 +176,7 @@ for league_id in leagues:
             ])
         matchup_df = pd.DataFrame(table_data, columns=headers, index=starters).rename(
             index={'SUPER_FLEX': 'SFLEX'})
-        matchup_df
+        st.dataframe(matchup_df)
         st.html("<small style='display:block;float:right;margin-top:0;padding-top:0;margin-bottom:30px;'>* projected</small>")
     if not locked_league_id:
         st.button("View League Matchups", on_click=lambda: st.query_params.update(
