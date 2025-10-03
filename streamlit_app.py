@@ -64,10 +64,12 @@ for league_id in leagues:
             team = "LA"
         game = pbp[(pbp['home_team'] == team) | (pbp['away_team'] == team)]
         seconds_remaining = game['game_seconds_remaining'].min()
-        if seconds_remaining:
-            return seconds_remaining / 60
-        else:
+        if pd.isna(seconds_remaining):
             return TOTAL_MINS
+        else:
+            return seconds_remaining / 60
+
+
     df['minutes_remaining'] = df.apply(minutes_remaining, axis=1)
 
     def compute_projection(row):
