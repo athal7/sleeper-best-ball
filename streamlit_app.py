@@ -72,22 +72,23 @@ for league_id in leagues:
     def compute_projection(row):
         pid = row.name
         if pid not in projections.index:
-            return None
+            return 0.0
         proj = projections.loc[pid]
         total = 0.0
         for stat, pts in league_info['scoring_settings'].items():
             if stat in proj and pd.notnull(proj[stat]):
                 total += proj[stat] * pts
-        return total if total != 0.0 else None
+        return total
     df['projection'] = df.apply(compute_projection, axis=1)
 
     def optimistic_score(row):
+        points = row['points'] or 0.0
         if row['minutes_remaining'] <= 0:
-            return row['points']
+            return points
         elif row['minutes_remaining'] >= TOTAL_MINS:
-            return row['projection'] if row['projection'] is not None else 0.0
+            return row['projection']
         else:
-            return row['points'] + (row['points'] * row['minutes_remaining'] / TOTAL_MINS) 
+            return points + (points * row['minutes_remaining'] / TOTAL_MINS) 
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
