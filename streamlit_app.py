@@ -57,20 +57,20 @@ for league_id in leagues:
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
 
-    TOTAL_MINS = 60
-    def minutes_remaining(row):
+    TOTAL_SECS = 60*60
+    def seconds_remaining(row):
         team = row['team']
         if team == "LAR":
             team = "LA"
         game = pbp[(pbp['home_team'] == team) | (pbp['away_team'] == team)]
         seconds_remaining = game['game_seconds_remaining'].min()
         if pd.isna(seconds_remaining):
-            return TOTAL_MINS
+            return TOTAL_SECS
         else:
-            return seconds_remaining / 60
+            return seconds_remaining
 
 
-    df['minutes_remaining'] = df.apply(minutes_remaining, axis=1)
+    df['seconds_remaining'] = df.apply(seconds_remaining, axis=1)
 
     def compute_projection(row):
         pid = row.name
@@ -86,12 +86,12 @@ for league_id in leagues:
 
     def optimistic_score(row):
         points = row['points'] or 0.0
-        if row['minutes_remaining'] <= 0:
+        if row['seconds_remaining'] <= 0:
             return points
-        elif row['minutes_remaining'] >= TOTAL_MINS:
+        elif row['seconds_remaining'] >= TOTAL_SECS:
             return row['projection']
         else:
-            return points + (points * row['minutes_remaining'] / TOTAL_MINS) 
+            return points + (points * row['seconds_remaining'] / TOTAL_SECS) 
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
