@@ -45,7 +45,8 @@ for league_id in leagues:
 
     all_players = pd.DataFrame.from_dict(
         Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
-    pbp = pd.DataFrame(nfl.load_pbp(season).to_pandas())
+    pbp = nfl.load_pbp(season).to_pandas()
+    pbp = pbp[pbp['week'] == week]
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
 
@@ -61,8 +62,7 @@ for league_id in leagues:
         team = row['team']
         if team == "LAR":
             team = "LA"
-        game = pbp.loc[(pbp['week'] == week) & (
-            (pbp['home_team'] == team) | (pbp['away_team'] == team))]
+        game = pbp.loc[(pbp['home_team'] == team) | (pbp['away_team'] == team)]
         if game.empty:
             return TOTAL_MINS
         else:
