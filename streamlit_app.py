@@ -146,7 +146,7 @@ for league_id in leagues:
     def team_score(team_id):
         starters = df[(df['roster_id'] == team_id) & (df['spos'].notnull())]
         score = f"{starters['optimistic'].sum():.2f}"
-        if not starters['minutes_remaining'].le(0).all():
+        if not starters['seconds_remaining'].le(0).all():
             score += "*"
         return score
 
