@@ -136,7 +136,7 @@ for league_id in leagues:
 
     def score(row):
         score = f"{row['optimistic']:.2f}"
-        if row['minutes_remaining'] > 0:
+        if row['seconds_remaining'] > 0:
             score += "*"
         return score
 
