@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players, get_sport_state
 import nflreadpy as nfl
-from nflreadpy.config import update_config
-
-update_config(cache_mode="off")
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown(
@@ -58,6 +55,7 @@ for league_id in leagues:
     df = df.join(all_players, how='left')
 
     TOTAL_SECS = 60*60
+
     def seconds_remaining(row):
         team = row['team']
         if team == "LAR":
@@ -68,7 +66,6 @@ for league_id in leagues:
             return TOTAL_SECS
         else:
             return seconds_remaining
-
 
     df['seconds_remaining'] = df.apply(seconds_remaining, axis=1)
 
@@ -91,7 +88,7 @@ for league_id in leagues:
         elif row['seconds_remaining'] >= TOTAL_SECS:
             return row['projection']
         else:
-            return points + (points * row['seconds_remaining'] / TOTAL_SECS) 
+            return points + (points * row['seconds_remaining'] / TOTAL_SECS)
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
