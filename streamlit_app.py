@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, Stats, Players, get_sport_state
-import nflreadpy as nfl
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown(
@@ -42,8 +41,6 @@ for league_id in leagues:
 
     all_players = pd.DataFrame.from_dict(
         Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
-    pbp = nfl.load_pbp(season).to_pandas()
-    pbp = pbp[pbp['week'] == week]
     projections = pd.DataFrame.from_dict(
         stats.get_week_projections("regular", season, week), orient='index')
 
@@ -53,21 +50,6 @@ for league_id in leagues:
         lambda row: row['players_points'].get(row.name, None), axis=1)
     df = df[['points', 'roster_id', 'matchup_id']]
     df = df.join(all_players, how='left')
-
-    TOTAL_SECS = 60*60
-
-    def seconds_remaining(row):
-        team = row['team']
-        if team == "LAR":
-            team = "LA"
-        game = pbp[(pbp['home_team'] == team) | (pbp['away_team'] == team)]
-        seconds_remaining = game['game_seconds_remaining'].min()
-        if pd.isna(seconds_remaining):
-            return TOTAL_SECS
-        else:
-            return seconds_remaining
-
-    df['seconds_remaining'] = df.apply(seconds_remaining, axis=1)
 
     def compute_projection(row):
         pid = row.name
@@ -82,13 +64,10 @@ for league_id in leagues:
     df['projection'] = df.apply(compute_projection, axis=1)
 
     def optimistic_score(row):
-        points = row['points'] or 0.0
-        if row['seconds_remaining'] <= 0:
-            return points
-        elif row['seconds_remaining'] >= TOTAL_SECS:
-            return row['projection']
+        if row.get('points', 0) > 0 :
+            return row['points']
         else:
-            return points + (points * row['seconds_remaining'] / TOTAL_SECS)
+            return row['projection']
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
@@ -133,7 +112,7 @@ for league_id in leagues:
 
     def score(row):
         score = f"{row['optimistic']:.2f}"
-        if row['seconds_remaining'] > 0:
+        if row['points'] == 0:
             score += "*"
         return score
 
@@ -143,10 +122,10 @@ for league_id in leagues:
     def team_score(team_id):
         starters = df[(df['roster_id'] == team_id) & (df['spos'].notnull())]
         score = f"{starters['optimistic'].sum():.2f}"
-        if not starters['seconds_remaining'].le(0).all():
+        if not starters['points'].gt(0).all():
             score += "*"
         return score
-
+    
     matchups = df['matchup_id'].nunique()
     starters = positions.index.tolist()
     for matchup in range(1, matchups + 1):
