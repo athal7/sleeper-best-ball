@@ -51,14 +51,19 @@ for league_id in leagues:
     for matchup_id, players in df.groupby('matchup_id'):
         if not locked_league_id and username and username not in players['fantasy_team'].values:
             continue
+
         (t1_name, t1_players), (t2_name, t2_players) = players.groupby('fantasy_team')
 
         matchup = positions.copy()[[]]
+
         matchup = matchup.join(t1_players.set_index('spos')[['name', 'score']], how='left').rename(columns={'name': t1_name, 'score': display.team_score(t1_players)})
+
         matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(columns={'name': t2_name, 'score': display.team_score(t2_players)})
+
         matchup
+        
     st.text("* projected")
-    
+
     if not locked_league_id:
         st.button("View League Matchups", on_click=lambda: st.query_params.update(
             {'league': league_id}))
