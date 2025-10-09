@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from sleeper_wrapper import League, User, Stats, Players, get_sport_state
+from sleeper_wrapper import League, User, get_sport_state
+import data
 
 st.title("Sleeper Best Ball 🏈")
 st.markdown(
@@ -37,37 +38,25 @@ for league_id in leagues:
         'display_name']]
     rosters = pd.DataFrame(league.get_rosters()).set_index(
         'roster_id').join(users, on='owner_id')
-    stats = Stats()
 
-    all_players = pd.DataFrame.from_dict(
-        Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']]
-    projections = pd.DataFrame.from_dict(
-        stats.get_week_projections("regular", season, week), orient='index')
 
     df = pd.DataFrame(league.get_matchups(week)).explode('players').rename(
         columns={'players': 'player_id'}).set_index('player_id')
     df['points'] = df.apply(
         lambda row: row['players_points'].get(row.name, None), axis=1)
     df = df[['points', 'roster_id', 'matchup_id']]
-    df = df.join(all_players, how='left')
-
-    def compute_projection(row):
-        pid = row.name
-        if pid not in projections.index:
-            return 0.0
-        proj = projections.loc[pid]
-        total = 0.0
-        for stat, pts in league_info['scoring_settings'].items():
-            if stat in proj and pd.notnull(proj[stat]):
-                total += proj[stat] * pts
-        return total
-    df['projection'] = df.apply(compute_projection, axis=1)
+    df = df.join(data.players(season, week, league_info['scoring_settings']), how='left')
 
     def optimistic_score(row):
-        if row.get('points', 0) > 0 :
-            return row['points']
-        else:
+        if row['pct_played'] is None:
+            return 0
+        elif row['pct_played'] == 0:
             return row['projection']
+        elif row['pct_played'] >= 1:
+            return row['points'] 
+        else:
+            return row['points'] + (1 - row['pct_played']) * row['projection']
+
     df['optimistic'] = df.apply(optimistic_score, axis=1)
     df = df.sort_values('optimistic', ascending=False)
 
@@ -112,7 +101,7 @@ for league_id in leagues:
 
     def score(row):
         score = f"{row['optimistic']:.2f}"
-        if row['points'] == 0:
+        if row['pct_played'] < 1:
             score += "*"
         return score
 
@@ -122,10 +111,10 @@ for league_id in leagues:
     def team_score(team_id):
         starters = df[(df['roster_id'] == team_id) & (df['spos'].notnull())]
         score = f"{starters['optimistic'].sum():.2f}"
-        if not starters['points'].gt(0).all():
+        if starters['pct_played'].lt(1).any():
             score += "*"
         return score
-    
+
     matchups = df['matchup_id'].nunique()
     starters = positions.index.tolist()
     for matchup in range(1, matchups + 1):
