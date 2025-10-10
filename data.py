@@ -69,12 +69,8 @@ def _rosters(league: League):
 def _optimistic_score(row):
     if pd.isna(row['pct_played']):
         return 0
-    elif row['pct_played'] == 0:
-        return row['projection']
-    elif row['pct_played'] >= 1:
-        return row['points']
-    else:
-        return row['points'] + (1 - row['pct_played']) * row['projection']
+
+    return row['points'] + (1 - row['pct_played']) * row['projection']
 
 
 def rosters(season: int, week: int, league: League):
