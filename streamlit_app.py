@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, get_sport_state
-import data
+from data import Data
 import display
 
 st.title("Sleeper Best Ball 🏈")
@@ -34,8 +34,9 @@ for league_id in leagues:
     league = League(league_id)
     st.markdown(f"###### {league.get_league_name()}")
 
-    df = data.rosters(season, week, league)
-    positions = data.starting_positions(league)
+    data = Data.from_league(league, season, week)
+    df = data.rosters()
+    positions = data.starting_positions()
 
     df['spos'] = None
     for fantasy_team in df['fantasy_team'].unique():
