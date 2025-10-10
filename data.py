@@ -74,7 +74,7 @@ def _optimistic_score(row):
     elif row['pct_played'] >= 1:
         return row['points']
     else:
-        return row['points'] + (1 - row['pct_played']) * row['projection']
+        return row['points'] / row['pct_played']
 
 
 def rosters(season: int, week: int, league: League):
