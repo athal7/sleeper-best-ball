@@ -26,7 +26,7 @@ def _game_status(season: int, week: int):
     df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
     df['team'] = df['team'].replace(team_mappings)
     df.set_index('team', inplace=True)
-    df['pct_played'] = (df['status.period'] * 15 + pd.to_numeric(df['status.clock']) / 60) / 60
+    df['pct_played'] = (df['status.period'] * 15 * 60 + df['status.clock']) / (60 * 60)
 
     return df[['pct_played']]
 
