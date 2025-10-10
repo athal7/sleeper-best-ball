@@ -26,7 +26,7 @@ def test_rosters():
     }, orient='index')
     data._game_statuses = pd.DataFrame.from_dict({
         'A': {'status.period': 1, 'status.clock': 15*60},
-        'B': {'status.period': 2, 'status.clock': 0},
+        'B': {'status.period': 2, 'status.clock': 10*60},
         'C': {'status.period': 4, 'status.clock': 0}
     }, orient='index')
     data._projections = pd.DataFrame.from_dict({
@@ -43,50 +43,50 @@ def test_rosters():
     data._positions = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
     df = data.rosters()
     assert len(df) == 4
-    assert df.iloc[0].name == 3
-    assert df.iloc[0].to_dict() == {
-        'first_name': 'Player',
-        'last_name': 'Three',
-        'position': 'TE',
-        'team': 'C',
-        'points': 20,
-        'fantasy_team': 'Team 1',
-        'matchup_id': 1,
-        'projected': False
-    }
-    assert df.iloc[1].name == 2
-    assert df.iloc[1].to_dict() == {
-        'first_name': 'Player',
-        'last_name': 'Two',
-        'position': 'WR',
-        'team': 'B',
-        'points': 10 + .5 * (50*0.1 + 1*6), # 18.0
-        'fantasy_team': 'Team 1',
-        'matchup_id': 1,
-        'projected': True
-    }
-    assert df.iloc[2].name == 1
-    assert df.iloc[2].to_dict() == {
-        'first_name': 'Player',
-        'last_name': 'One',
-        'position': 'QB',
-        'team': 'A',
-        'points': 100*0.04 + 1*4, # 8.0
-        'fantasy_team': 'Team 1',
-        'matchup_id': 1,
-        'projected': True
-    }
-    assert df.iloc[3].name == 4
-    assert df.iloc[3].to_dict() == {
-        'first_name': 'Player',
-        'last_name': 'Four',
-        'position': 'RB',
-        'team': 'D',
-        'points': 0,
-        'fantasy_team': 'Team 1',
-        'matchup_id': 1,
-        'projected': False
-    }
+
+    p3 = df.iloc[0]
+    assert p3.name == 3
+    assert p3.first_name == 'Player'
+    assert p3.last_name == 'Three'
+    assert p3.position == 'TE'
+    assert p3.team == 'C'
+    assert p3.points == 20
+    assert p3.fantasy_team == 'Team 1'
+    assert p3.matchup_id == 1
+    assert p3.projected == False
+    
+    p2 = df.iloc[1]
+    assert p2.name == 2
+    assert p2.first_name == 'Player'
+    assert p2.last_name == 'Two'
+    assert p2.position == 'WR'
+    assert p2.team == 'B'
+    assert round(p2.points, 2) == round((10 + (50*0.1 + 1*6) * 2/3), 2)
+    assert p2.fantasy_team == 'Team 1'
+    assert p2.matchup_id == 1
+    assert p2.projected == True
+
+    p1 = df.iloc[2]
+    assert p1.name == 1
+    assert p1.first_name == 'Player'
+    assert p1.last_name == 'One'
+    assert p1.position == 'QB'
+    assert p1.team == 'A'
+    assert round(p1.points, 2) == round((100*0.04 + 1*4), 2)
+    assert p1.fantasy_team == 'Team 1'
+    assert p1.matchup_id == 1
+    assert p1.projected == True
+
+    p4 = df.iloc[3]
+    assert p4.name == 4
+    assert p4.first_name == 'Player'
+    assert p4.last_name == 'Four'
+    assert p4.position == 'RB'
+    assert p4.team == 'D'
+    assert round(p4.points, 2) == round(0, 2)
+    assert p4.fantasy_team == 'Team 1'
+    assert p4.matchup_id == 1
+    assert p4.projected == False
 
 
 def test_starting_positions():
