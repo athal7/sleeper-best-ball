@@ -26,7 +26,7 @@ def _game_status(season: int, week: int):
     df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
     df['team'] = df['team'].replace(team_mappings)
     df.set_index('team', inplace=True)
-    df['pct_played'] = (df['status.period'] * 15 + df['status.clock'] / 60) / 60
+    df['pct_played'] = (df['status.period'] * 15 - df['status.clock'] / 60) / 60
 
     return df[['pct_played']]
 
@@ -74,7 +74,7 @@ def _optimistic_score(row):
     elif row['pct_played'] >= 1:
         return row['points']
     else:
-        return row['points'] / row['pct_played']
+        return row['points'] + (1 - row['pct_played']) * row['projection']
 
 
 def rosters(season: int, week: int, league: League):
