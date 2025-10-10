@@ -19,20 +19,17 @@ position_mappings = pd.DataFrame([
 ]).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
 
 
-def _game_status(season: int, week: int):
+def _game_statuses(season: int, week: int):
     url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
     resp = requests.get(url)
     data = resp.json()
-    df = pd.json_normalize([e['competitions'][0]
-                           for e in data['events']]).explode('competitors')
+    df =pd.json_normalize([e['competitions'][0]
+                           for e in data['events']])
+    df = df.explode('competitors')
     df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
     df['team'] = df['team'].replace(team_mappings)
     df.set_index('team', inplace=True)
-    df['pct_played'] = (df['status.period'] * 15 -
-                        df['status.clock'] / 60) / 60
-
-    return df[['pct_played']]
-
+    return df[['status.period', 'status.clock']]
 
 def _projection(scoring: dict):
     def _compute(row):
@@ -65,7 +62,7 @@ class Data:
     @staticmethod
     def from_league(league: League, season: int, week: int):
         return Data(
-            _game_statuses=_game_status(season, week),
+            _game_statuses=_game_statuses(season, week),
             _matchups=pd.DataFrame(league.get_matchups(week)),
             _rosters=pd.DataFrame(league.get_rosters()).set_index('roster_id')[['owner_id']],
             _users=pd.DataFrame(league.get_users()).set_index('user_id')[['display_name']],
@@ -91,6 +88,7 @@ class Data:
         df = df.join(self._game_statuses, on='team', how='left')
         df = df.join(self._projections, on=df.index, how='left')
 
+        df['pct_played'] = (df['status.period'] * 15 - df['status.clock'] / 60) / 60
         df['projection'] = df.apply(_projection(self._scoring), axis=1)
         df['points'] = df.apply(_optimistic_score, axis=1)
         df['projected'] = df['pct_played'].apply(

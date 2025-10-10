@@ -25,9 +25,9 @@ def test_rosters():
         4: {'first_name': 'Player', 'last_name': 'Four', 'team': 'D', 'position': 'RB'}
     }, orient='index')
     data._game_statuses = pd.DataFrame.from_dict({
-        'A': {'pct_played': 0},
-        'B': {'pct_played': 0.5},
-        'C': {'pct_played': 1}
+        'A': {'status.period': 1, 'status.clock': 15*60},
+        'B': {'status.period': 2, 'status.clock': 0},
+        'C': {'status.period': 4, 'status.clock': 0}
     }, orient='index')
     data._projections = pd.DataFrame.from_dict({
         1: {'passing_yards': 100, 'passing_touchdowns': 1},
