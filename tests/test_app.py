@@ -1,10 +1,11 @@
 from streamlit.testing.v1 import AppTest
 
-app = "streamlit_app.py"
 user = "athal7"
 league = "Metro Master"
 league_id = "1204265604316409856"
 
+def _app():
+    return AppTest.from_file("streamlit_app.py", default_timeout=10)
 
 def _validate_user(at: AppTest):
     assert at.text_input[0].value == user
@@ -24,27 +25,27 @@ def _validate_league(at: AppTest):
 
 
 def test_by_username_input():
-    at = AppTest.from_file(app).run()
+    at = _app().run()
     at.text_input[0].set_value(user).run()
     _validate_user(at)
 
 
 def test_by_username_query_param():
-    at = AppTest.from_file(app)
+    at = _app()
     at.query_params['username'] = user
     at.run()
     _validate_user(at)
 
 
 def test_by_league_query_param():
-    at = AppTest.from_file(app)
+    at = _app()
     at.query_params['league'] = league_id
     at.run()
     _validate_league(at)
 
 
 def test_from_user_to_league_to_user():
-    at = AppTest.from_file(app).run()
+    at = _app().run()
     at.text_input[0].set_value(user).run()
 
     try:
