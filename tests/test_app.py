@@ -121,7 +121,7 @@ def test_rosters():
     assert p3.points == 20
     assert p3.fantasy_team == 'Team 1'
     assert p3.matchup_id == 1
-    assert p3.projected == False
+    assert p3.pct_played == 1.0
     
     p2 = df.iloc[1]
     assert p2.name == 2
@@ -132,7 +132,7 @@ def test_rosters():
     assert round(p2.points, 2) == round((10 + (50*0.1 + 1*6) * 2/3), 2)
     assert p2.fantasy_team == 'Team 1'
     assert p2.matchup_id == 1
-    assert p2.projected == True
+    assert p2.pct_played == 1/3
 
     p1 = df.iloc[2]
     assert p1.name == 1
@@ -143,7 +143,7 @@ def test_rosters():
     assert round(p1.points, 2) == round((100*0.04 + 1*4), 2)
     assert p1.fantasy_team == 'Team 1'
     assert p1.matchup_id == 1
-    assert p1.projected == True
+    assert p1.pct_played == 0
 
     p4 = df.iloc[3]
     assert p4.name == 4
@@ -154,7 +154,7 @@ def test_rosters():
     assert round(p4.points, 2) == round(0, 2)
     assert p4.fantasy_team == 'Team 1'
     assert p4.matchup_id == 1
-    assert p4.projected == False
+    assert p4.pct_played == 0
 
 
 def test_starting_positions():
