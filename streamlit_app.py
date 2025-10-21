@@ -190,7 +190,7 @@ for league_id in leagues:
 
         st.table(matchup)
 
-    st.markdown("<small>actual | <em>projected</em> | <em><strong>live projection</strong></em></small>", unsafe_allow_html=True)
+    st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>", unsafe_allow_html=True)
 
     if not locked_league_id:
         st.button("View League Matchups", on_click=lambda: st.query_params.update(
