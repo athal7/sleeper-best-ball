@@ -12,16 +12,16 @@ def player_name(row):
 def score(row):
     score = f"{row['points']:.2f}"
     if row['pct_played'] < 1:
-        score += "*"
+        score = f"*{score}*"
         if row['pct_played'] > 0:
-            score += "*"
+            score = f"**{score}**"
     return score
 
 
 def team_score(team):
     score = f"{team['points'].sum():.2f}"
     if team['pct_played'].any() < 1:
-        score += "*"
+        score = f"*{score}*"
     return score
 
 
@@ -134,7 +134,7 @@ st.markdown(
     "*Sleeper predictions are misleading for best ball scoring, so I built this app*")
 current = get_sport_state('nfl')
 season = int(current['league_season'])
-week = int(current['display_week'])
+week = 8  # int(current['display_week'])
 
 username = st.query_params.get('username')
 locked_league_id = st.query_params.get('league')
@@ -190,7 +190,7 @@ for league_id in leagues:
 
         st.table(matchup)
 
-    st.markdown("<small>projected*<br />live**</small>", unsafe_allow_html=True)
+    st.markdown("<small>actual | <em>projected</em> | <em><strong>live</strong></em></small>", unsafe_allow_html=True)
 
     if not locked_league_id:
         st.button("View League Matchups", on_click=lambda: st.query_params.update(
