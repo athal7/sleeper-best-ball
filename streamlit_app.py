@@ -188,7 +188,7 @@ for league_id in leagues:
         matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
             columns={'name': t2_name, 'score': team_score(t2_players)})
 
-        matchup
+        st.table(matchup)
 
     st.markdown("<small>projected*<br />live**</small>", unsafe_allow_html=True)
 

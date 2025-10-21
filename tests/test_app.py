@@ -13,17 +13,17 @@ def _validate_user(at: AppTest):
     assert at.text_input[0].value == user
     assert user in at.query_params['username']
     assert league in at.markdown[2].value
-    assert len(at.dataframe) == 1
-    assert user in at.dataframe[0].value
+    assert len(at.table) == 1
+    assert user in at.table[0].value
 
 
 def _validate_league(at: AppTest):
     assert league in at.markdown[2].value
-    assert len(at.dataframe) > 1
+    assert len(at.table) > 1
     i = 0
-    while at.dataframe[i].value is not None and user not in at.dataframe[i].value:
+    while at.table[i].value is not None and user not in at.table[i].value:
         i += 1
-    assert user in at.dataframe[i].value
+    assert user in at.table[i].value
 
 
 def test_by_username_input():
