@@ -167,6 +167,6 @@ def test_starting_positions():
     assert positions.loc['WR1']['eligible'] == ['WR']
     assert positions.loc['WR2']['eligible'] == ['WR']
     assert positions.loc['TE1']['eligible'] == ['TE']
-    assert positions.loc['FLEX1']['eligible'] == ['RB', 'WR', 'TE']
-    assert positions.loc['SFLEX1']['eligible'] == ['QB', 'RB', 'WR', 'TE']
+    assert positions.loc['FX1']['eligible'] == ['RB', 'WR', 'TE']
+    assert positions.loc['SFX1']['eligible'] == ['QB', 'RB', 'WR', 'TE']
     assert positions.loc['DEF1']['eligible'] == ['DEF']
