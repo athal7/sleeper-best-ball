@@ -33,8 +33,8 @@ position_mappings = pd.DataFrame([
     ['RB', 'RB', ['RB']],
     ['WR', 'WR', ['WR']],
     ['TE', 'TE', ['TE']],
-    ['FLEX', 'FLEX', ['RB', 'WR', 'TE']],
-    ['SUPER_FLEX', 'SFLEX', ['QB', 'RB', 'WR', 'TE']],
+    ['FLEX', 'FX', ['RB', 'WR', 'TE']],
+    ['SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']],
     ['K', 'K', ['K']],
     ['DEF', 'DEF', ['DEF']]
 ]).rename(columns={1: 'pos', 2: 'eligible'}).set_index(0)
@@ -153,11 +153,11 @@ else:
             st.warning("No leagues found for this user.")
 
 if leagues:
-    st.markdown(f"#### Week {week}")
+    st.markdown(f"### Week {week}")
 
 for league_id in leagues:
     league = League(league_id)
-    st.markdown(f"###### {league.get_league_name()}")
+    st.markdown(f"##### {league.get_league_name()}")
 
     data = Data.from_league(league, season, week)
     df = data.rosters()
