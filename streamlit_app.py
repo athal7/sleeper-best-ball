@@ -134,7 +134,7 @@ st.markdown(
     "*Sleeper predictions are misleading for best ball scoring, so I built this app*")
 current = get_sport_state('nfl')
 season = int(current['league_season'])
-week = 8  # int(current['display_week'])
+week = int(current['display_week'])
 
 username = st.query_params.get('username')
 locked_league_id = st.query_params.get('league')
