@@ -116,7 +116,7 @@ def test_rosters():
     assert p3.name == 3
     assert p3.first_name == 'Player'
     assert p3.last_name == 'Three'
-    assert p3.position == 'TE'
+    assert p3.pos == 'TE'
     assert p3.team == 'C'
     assert p3.points == 20
     assert p3.fantasy_team == 'Team 1'
@@ -127,7 +127,7 @@ def test_rosters():
     assert p2.name == 2
     assert p2.first_name == 'Player'
     assert p2.last_name == 'Two'
-    assert p2.position == 'WR'
+    assert p2.pos == 'WR'
     assert p2.team == 'B'
     assert round(p2.points, 2) == round((10 + (50*0.1 + 1*6) * 2/3), 2)
     assert p2.fantasy_team == 'Team 1'
@@ -138,7 +138,7 @@ def test_rosters():
     assert p1.name == 1
     assert p1.first_name == 'Player'
     assert p1.last_name == 'One'
-    assert p1.position == 'QB'
+    assert p1.pos == 'QB'
     assert p1.team == 'A'
     assert round(p1.points, 2) == round((100*0.04 + 1*4), 2)
     assert p1.fantasy_team == 'Team 1'
@@ -149,7 +149,7 @@ def test_rosters():
     assert p4.name == 4
     assert p4.first_name == 'Player'
     assert p4.last_name == 'Four'
-    assert p4.position == 'RB'
+    assert p4.pos == 'RB'
     assert p4.team == 'D'
     assert round(p4.points, 2) == round(0, 2)
     assert p4.fantasy_team == 'Team 1'
