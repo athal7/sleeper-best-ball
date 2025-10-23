@@ -19,7 +19,8 @@ def score(row):
 
 
 def team_score(team):
-    score = f"{team['points'].sum():.2f}"
+    starters = team[~team['spos'].str.startswith('BN')]
+    score = f"{starters['points'].sum():.2f}"
     if team['pct_played'].any() < 1:
         score = f"*{score}*"
     return score
@@ -36,7 +37,8 @@ position_mappings = pd.DataFrame([
     ['FLEX', 'FX', ['RB', 'WR', 'TE']],
     ['SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']],
     ['K', 'K', ['K']],
-    ['DEF', 'DEF', ['DEF']]
+    ['DEF', 'DEF', ['DEF']],
+    ['BN', 'BN', ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']],
 ]).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
 
 
@@ -188,7 +190,7 @@ for league_id in leagues:
 
         matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
             columns={'name': t2_name, 'score': team_score(t2_players)})
-        
+
         st.table(matchup.to_dict(), border="horizontal")
 
     st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>",
