@@ -124,14 +124,17 @@ class Data:
         df = position_mappings.copy()
         df = df.join(pd.Series(self._positions).value_counts(), how='inner')
         df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
-        df['pos'] = df['pos'] + \
-            (df.groupby('pos').cumcount() + 1).astype(str)
+        counts = df.groupby('pos').cumcount()
+        print(counts)
+        df['pos'] = df.apply(
+            lambda row: f"{row['pos']}{counts[row.name]+1}" if counts[row.name] > 0 else row['pos'], axis=1)
         df.set_index('pos', inplace=True)
         return df[['eligible']]
 
 
 st.title("Sleeper Best Ball 🏈")
-st.markdown("*Sleeper predictions are misleading for best ball scoring, so I built this app*")
+st.markdown(
+    "*Sleeper predictions are misleading for best ball scoring, so I built this app*")
 current = get_sport_state('nfl')
 season = int(current['league_season'])
 week = int(current['display_week'])
@@ -187,8 +190,9 @@ for league_id in leagues:
         matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
             columns={'name': t2_name, 'score': team_score(t2_players)})
         st.table(matchup, border="horizontal")
-    
-    st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>", unsafe_allow_html=True)
+
+    st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>",
+                unsafe_allow_html=True)
 
     if not locked_league_id:
         st.button("View League Matchups", on_click=lambda: st.query_params.update(

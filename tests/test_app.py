@@ -159,14 +159,16 @@ def test_rosters():
 
 def test_starting_positions():
     data = Data()
-    data._positions = ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
+    data._positions = ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
     positions = data.starting_positions()
-    assert positions.loc['QB1']['eligible'] == ['QB']
-    assert positions.loc['RB1']['eligible'] == ['RB']
+    print(positions)
+    assert positions.loc['QB']['eligible'] == ['QB']
+    assert positions.loc['RB']['eligible'] == ['RB']
     assert positions.loc['RB2']['eligible'] == ['RB']
-    assert positions.loc['WR1']['eligible'] == ['WR']
+    assert positions.loc['WR']['eligible'] == ['WR']
     assert positions.loc['WR2']['eligible'] == ['WR']
-    assert positions.loc['TE1']['eligible'] == ['TE']
-    assert positions.loc['FX1']['eligible'] == ['RB', 'WR', 'TE']
-    assert positions.loc['SFX1']['eligible'] == ['QB', 'RB', 'WR', 'TE']
-    assert positions.loc['DEF1']['eligible'] == ['DEF']
+    assert positions.loc['WR3']['eligible'] == ['WR']
+    assert positions.loc['TE']['eligible'] == ['TE']
+    assert positions.loc['FX']['eligible'] == ['RB', 'WR', 'TE']
+    assert positions.loc['SFX']['eligible'] == ['QB', 'RB', 'WR', 'TE']
+    assert positions.loc['DEF']['eligible'] == ['DEF']
