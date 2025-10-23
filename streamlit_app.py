@@ -177,21 +177,37 @@ for league_id in leagues:
     df = df[df['spos'].notnull()]
     df['name'] = df.apply(player_name, axis=1)
     df['score'] = df.apply(score, axis=1)
+    matchups = df.groupby('matchup_id')
+
+    matchup_tabs = []
+    matchup_labels = []
+    matchup_data = []
+
     for matchup_id, players in df.groupby('matchup_id'):
         if not locked_league_id and username and username not in players['fantasy_team'].values:
             continue
 
-        (t1_name, t1_players), (t2_name, t2_players) = players.groupby('fantasy_team')
+        grouped = list(players.groupby('fantasy_team'))
+        if len(grouped) != 2:
+            continue
 
-        matchup = positions.copy()[[]]
+        (t1_name, t1_players), (t2_name, t2_players) = grouped
 
-        matchup = matchup.join(t1_players.set_index('spos')[['name', 'score']], how='left').rename(
-            columns={'name': t1_name, 'score': team_score(t1_players)})
+        tab_label = f"{t1_name} | {t2_name}"
+        matchup_labels.append(tab_label)
+        matchup_data.append((t1_name, t1_players, t2_name, t2_players))
 
-        matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
-            columns={'name': t2_name, 'score': team_score(t2_players)})
-
-        st.table(matchup.to_dict(), border="horizontal")
+    if matchup_labels:
+        tabs = st.tabs(matchup_labels)
+        for i, tab in enumerate(tabs):
+            with tab:
+                t1_name, t1_players, t2_name, t2_players = matchup_data[i]
+                matchup = positions.copy()[[]]
+                matchup = matchup.join(t1_players.set_index('spos')[['name', 'score']], how='left').rename(
+                    columns={'name': t1_name, 'score': team_score(t1_players)})
+                matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
+                    columns={'name': t2_name, 'score': team_score(t2_players)})
+                st.table(matchup.to_dict(), border="horizontal")
 
     st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>",
                 unsafe_allow_html=True)
