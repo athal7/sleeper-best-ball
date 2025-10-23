@@ -37,7 +37,7 @@ position_mappings = pd.DataFrame([
     ['SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']],
     ['K', 'K', ['K']],
     ['DEF', 'DEF', ['DEF']]
-]).rename(columns={1: 'pos', 2: 'eligible'}).set_index(0)
+]).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
 
 
 def _game_statuses(season: int, week: int):
@@ -116,19 +116,18 @@ class Data:
         df.loc[df['pct_played'].isna(), 'pct_played'] = 0
         df['projection'] = df.apply(_projection(self._scoring), axis=1)
         df['points'] = df.apply(_optimistic_score, axis=1)
-        df['pos'] = df['position']
+        df['position'] = df['position']
 
-        return df.sort_values('points', ascending=False)[['first_name', 'last_name', 'team', 'pos', 'points', 'fantasy_team', 'matchup_id', 'pct_played']]
+        return df.sort_values('points', ascending=False)[['first_name', 'last_name', 'team', 'position', 'points', 'fantasy_team', 'matchup_id', 'pct_played']]
 
     def starting_positions(self):
         df = position_mappings.copy()
         df = df.join(pd.Series(self._positions).value_counts(), how='inner')
         df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
-        counts = df.groupby('pos').cumcount()
-        print(counts)
-        df['pos'] = df.apply(
-            lambda row: f"{row['pos']}{counts[row.name]+1}" if counts[row.name] > 0 else row['pos'], axis=1)
-        df.set_index('pos', inplace=True)
+        counts = df.groupby('position').cumcount()
+        df['position'] = df.apply(
+            lambda row: f"{row['position']}{counts[row.name]+1}" if counts[row.name] > 0 else row['position'], axis=1)
+        df.set_index('position', inplace=True)
         return df[['eligible']]
 
 
@@ -169,7 +168,7 @@ for league_id in leagues:
     df['spos'] = None
     for fantasy_team in df['fantasy_team'].unique():
         for spos, eligible in positions.iterrows():
-            starter = df.loc[(df['fantasy_team'] == fantasy_team) & (df['pos'].isin(eligible['eligible'])) & (
+            starter = df.loc[(df['fantasy_team'] == fantasy_team) & (df['position'].isin(eligible['eligible'])) & (
                 df['spos'].isnull()), 'spos'].head(1).index
             df.loc[starter, 'spos'] = spos
 
@@ -189,7 +188,8 @@ for league_id in leagues:
 
         matchup = matchup.join(t2_players.set_index('spos')[['score', 'name']], how='left', rsuffix='_2').rename(
             columns={'name': t2_name, 'score': team_score(t2_players)})
-        st.table(matchup, border="horizontal")
+        
+        st.table(matchup.to_dict(), border="horizontal")
 
     st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>",
                 unsafe_allow_html=True)
