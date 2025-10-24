@@ -21,7 +21,7 @@ def score(row):
 def team_score(team):
     starters = team[~team['spos'].str.startswith('BN')]
     score = f"{starters['points'].sum():.2f}"
-    if team['pct_played'].any() < 1:
+    if (team['pct_played'] < 1).any():
         score = f"*{score}*"
     return score
 
