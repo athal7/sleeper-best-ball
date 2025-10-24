@@ -11,18 +11,18 @@ def player_name(row):
 
 def score(row):
     score = f"{row['points']:.2f}"
-    if row['pct_played'] < 1:
+    if row['pct_played'] == 1:
+        score = f"**{score}**"
+    elif row['pct_played'] > 0:
         score = f"*{score}*"
-        if row['pct_played'] > 0:
-            score = f"**{score}**"
     return score
 
 
 def team_score(team):
     starters = team[~team['spos'].str.startswith('BN')]
     score = f"{starters['points'].sum():.2f}"
-    if (team['pct_played'] < 1).any():
-        score = f"*{score}*"
+    if (team['pct_played'] == 1).all():
+        score = f"**{score}**"
     return score
 
 
@@ -209,7 +209,7 @@ for league_id in leagues:
                     columns={'name': t2_name, 'score': team_score(t2_players)})
                 st.table(matchup.to_dict(), border="horizontal")
 
-    st.markdown("<small>actual | <em>projection</em> | <em><strong>live projection</strong></em></small>",
+    st.markdown("<small><strong>actual</strong> | projection | <em>live projection</em></small>",
                 unsafe_allow_html=True)
 
     if not locked_league_id:
