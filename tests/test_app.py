@@ -13,13 +13,11 @@ def _validate_user(at: AppTest):
     assert at.text_input[0].value == user
     assert user in at.query_params['username']
     assert league in at.markdown[2].value
-    assert len(at.table) == 1
     assert user in at.table[0].value
 
 
 def _validate_league(at: AppTest):
     assert league in at.markdown[2].value
-    assert len(at.table) > 1
     i = 0
     while at.table[i].value is not None and user not in at.table[i].value:
         i += 1
@@ -70,22 +68,8 @@ def test_from_user_to_league_to_user():
         pass  
     
 
-def test_rosters():
+def test_players():
     data = Data()
-    data._matchups = pd.DataFrame([{
-        'players': [1, 2, 3, 4],
-        'players_points': {1: 0, 2: 10, 3: 20, 4: None},
-        'roster_id': 1,
-        'matchup_id': 1
-    }])
-    data._rosters = pd.DataFrame([{
-        'owner_id': 1,
-        'roster_id': 1
-    }]).set_index('roster_id')
-    data._users = pd.DataFrame([{
-        'user_id': 1,
-        'display_name': 'Team 1'
-    }]).set_index('user_id')
     data._players = pd.DataFrame.from_dict({
         1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB'},
         2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR'},
@@ -102,6 +86,10 @@ def test_rosters():
         2: {'receiving_yards': 50, 'receiving_touchdowns': 1},
         3: {'receiving_yards': 75, 'receiving_touchdowns': 1}
     }, orient='index')
+    data._stats = pd.DataFrame.from_dict({
+        2: {'receiving_yards': 10, 'receiving_touchdowns': 0},
+        3: {'receiving_yards': 20, 'receiving_touchdowns': 0}
+    }, orient='index')
     data._scoring = {
         'passing_yards': 0.04,
         'passing_touchdowns': 4,
@@ -109,52 +97,40 @@ def test_rosters():
         'receiving_touchdowns': 6
     }
     data._positions = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
-    df = data.rosters()
+    df = data.players()
     assert len(df) == 4
-
-    p3 = df.iloc[0]
-    assert p3.name == 3
-    assert p3.first_name == 'Player'
-    assert p3.last_name == 'Three'
-    assert p3.position == 'TE'
-    assert p3.team == 'C'
-    assert p3.points == 20
-    assert p3.fantasy_team == 'Team 1'
-    assert p3.matchup_id == 1
-    assert p3.pct_played == 1.0
     
-    p2 = df.iloc[1]
-    assert p2.name == 2
-    assert p2.first_name == 'Player'
-    assert p2.last_name == 'Two'
-    assert p2.position == 'WR'
-    assert p2.team == 'B'
-    assert round(p2.points, 2) == round((10 + (50*0.1 + 1*6) * 2/3), 2)
-    assert p2.fantasy_team == 'Team 1'
-    assert p2.matchup_id == 1
-    assert p2.pct_played == 1/3
+    p1, p2, p3, p4 = df.to_dict(orient='records')
+    assert p1['name'] == 'P. One'
+    assert p1['position'] == 'QB'
+    assert p1['team'] == 'A'
+    assert p1['points'] == 0
+    assert round(p1['projection'], 2) == round((100*0.04 + 1*4), 2)
+    assert p1['optimistic'] == p1['projection']
+    assert p1['pct_played'] == 0
 
-    p1 = df.iloc[2]
-    assert p1.name == 1
-    assert p1.first_name == 'Player'
-    assert p1.last_name == 'One'
-    assert p1.position == 'QB'
-    assert p1.team == 'A'
-    assert round(p1.points, 2) == round((100*0.04 + 1*4), 2)
-    assert p1.fantasy_team == 'Team 1'
-    assert p1.matchup_id == 1
-    assert p1.pct_played == 0
+    assert p2['name'] == 'P. Two'
+    assert p2['position'] == 'WR'
+    assert p2['team'] == 'B'
+    assert round(p2['points'], 2) == round(10*0.1, 2)
+    assert round(p2['projection'], 2) == round((50*0.1 + 1*6), 2)
+    assert round(p2['optimistic'], 2) == round(p2['points'] + (2/3)*p2['projection'], 2)
+    assert p2['pct_played'] == 1/3
 
-    p4 = df.iloc[3]
-    assert p4.name == 4
-    assert p4.first_name == 'Player'
-    assert p4.last_name == 'Four'
-    assert p4.position == 'RB'
-    assert p4.team == 'D'
-    assert round(p4.points, 2) == round(0, 2)
-    assert p4.fantasy_team == 'Team 1'
-    assert p4.matchup_id == 1
-    assert p4.pct_played == 0
+    assert p3['name'] == 'P. Three'
+    assert p3['position'] == 'TE'
+    assert round(p3['points']) == round(20*0.1, 2)
+    assert round(p3['projection'], 2) == round((75*0.1 + 1*6), 2)
+    assert p3['optimistic'] == p3['points']
+    assert p3['pct_played'] == 1
+
+    assert p4['name'] == 'P. Four'
+    assert p4['position'] == 'RB'
+    assert p4['team'] == 'D'
+    assert p4['points'] == 0
+    assert p4['projection'] == 0
+    assert p4['optimistic'] == 0
+    assert p4['pct_played'] == 0
 
 
 def test_starting_positions():
