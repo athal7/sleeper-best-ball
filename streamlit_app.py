@@ -158,7 +158,7 @@ td.projection {
 td.team.actual {
     font-size: 1.2em;
 }
-td.position {
+td.position, th.position {
     text-align: center;
     vertical-align: middle;
     font-size: 0.9em;
