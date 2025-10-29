@@ -207,15 +207,16 @@ leagues = []
 
 if locked_league_id:
     leagues = [locked_league_id]
+elif username:
+    user = User(username)
+    leagues = [l['league_id'] for l in user.get_all_leagues('nfl', season)]
+    if not leagues:
+        st.warning("No leagues found for this user.")
 else:
     st.text_input("Enter your Sleeper username:", key='username_input',
                   on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
 
-    if username and not locked_league_id:
-        user = User(username)
-        leagues = [l['league_id'] for l in user.get_all_leagues('nfl', season)]
-        if not leagues:
-            st.warning("No leagues found for this user.")
+
 
 for league_id in leagues:
     league = League(league_id)
