@@ -166,8 +166,7 @@ td.position, th.position {
 </style>
 """)
 st.title("Sleeper Best Ball 🏈")
-st.markdown(
-    "*Sleeper predictions are misleading for best ball scoring, so I built this app*")
+st.markdown("*optimistic projections for best ball scoring*")
 
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
     rows = []
