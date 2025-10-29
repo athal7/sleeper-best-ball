@@ -178,6 +178,12 @@ def _style():
         vertical-align: middle;
         font-size: 0.9em;
     }
+    div.label {
+        margin: 0;
+        padding: 0;
+        font-size: 0.7em;
+        font-style: normal;
+    }
     @media (prefers-color-scheme: light) {
         td.live {
             background: #fff3b0;
@@ -249,11 +255,11 @@ def _matchup_display(team1, team2, positions, players):
         </thead>
         <tbody>
             <tr>
-                <td class="actual team">{team1['points']:.2f}</td>
-                <td class="projection team">{_live_team_projection(t1_players)}</td>
+                <td class="actual team"><div class='label'>score</div>{team1['points']:.2f}</td>
+                <td class="projection team"><div class='label'>projection</div>{_live_team_projection(t1_players)}</td>
                 <td></td>
-                <td class="actual team">{team2['points']:.2f}</td>
-                <td class="projection team">{_live_team_projection(t2_players)}</td>
+                <td class="actual team"><div class='label'>score</div>{team2['points']:.2f}</td>
+                <td class="projection team"><div class='label'>projection</div>{_live_team_projection(t2_players)}</td>
             </tr>
         </tbody>
     </table>
