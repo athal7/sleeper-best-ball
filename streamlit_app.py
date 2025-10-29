@@ -138,10 +138,7 @@ table {
     text-align: left;
 }
 col {
-    width: 22%;
-}
-col.position {
-    width: 12%;
+    width: 20%;
 }
 th {
     font-size: 1.5em;
