@@ -254,7 +254,7 @@ for league_id in leagues:
             <thead>
                 <tr>
                     <th colspan=2>{team1['fantasy_team']}</th>
-                    <th></th>
+                    <th class="position">vs</th>
                     <th colspan=2>{team2['fantasy_team']}</th>
                 </tr>
             </thead>
