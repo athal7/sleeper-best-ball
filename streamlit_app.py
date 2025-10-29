@@ -178,11 +178,27 @@ def _style():
         vertical-align: middle;
         font-size: 0.9em;
     }
+    @media (prefers-color-scheme: light) {
+        td.live {
+            background: #fff3b0;
+            color: #000;
+        }
+    }
+
+    @media (prefers-color-scheme: dark) {
+        td.live {
+            background: #3b2f00;
+            color: #fff6d0;
+        }
+    }
     </style>
     """)
 
+def _is_active(pct_played: float):
+    return pct_played < 1.0 and pct_played > 0.0
+
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
-    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'pct_played': 0.0}
+    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'pct_played': 0.0, 'team': ''}
     rows = []
     for pos, row in positions.iterrows():
         t1 = team1[team1['spos'] == pos]
@@ -196,9 +212,9 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
 
         rows.append(f"""                    
             <tr>
-            <td colspan="2" class="player">{p1['name']}</td>
+            <td colspan="2" class="player {'live' if _is_active(p1['pct_played']) else ''}">{p1['name']} <small>{p1['team']}</small></td>
             <td rowspan="2" class="position">{row['position']}</td>
-            <td colspan="2" class="player">{p2['name']}</td>
+            <td colspan="2" class="player {'live' if _is_active(p2['pct_played']) else ''}">{p2['name']} <small>{p2['team']}</small></td>
             </tr>
             <tr>
             <td class="actual">{p1['points']:.2f}</td>
