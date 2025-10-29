@@ -92,7 +92,7 @@ class Data:
         )
 
     def players(self):
-        df = self._players
+        df = self._players.copy()
         df = df[df['team'].notna()]
         df['name'] = df.apply(
             lambda row: f"{row['first_name'][0]}. {row['last_name']}", axis=1)

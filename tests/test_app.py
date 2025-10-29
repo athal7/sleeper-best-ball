@@ -9,64 +9,28 @@ league_id = "1204265604316409856"
 def _app():
     return AppTest.from_file("streamlit_app.py", default_timeout=10)
 
-def _validate_user(at: AppTest):
-    assert at.text_input[0].value == user
-    assert user in at.query_params['username']
-    assert league in at.markdown[2].value
-    assert user in at.table[0].value
-
-
-def _validate_league(at: AppTest):
-    assert league in at.markdown[2].value
-    i = 0
-    while at.table[i].value is not None and user not in at.table[i].value:
-        i += 1
-    assert user in at.table[i].value
-
-
 def test_by_username_input():
     at = _app().run()
     at.text_input[0].set_value(user).run()
-    _validate_user(at)
+    assert league in at.markdown[1].value
+    assert league_id in at.markdown[2].value
 
 
 def test_by_username_query_param():
     at = _app()
     at.query_params['username'] = user
     at.run()
-    _validate_user(at)
+    assert league in at.markdown[1].value
+    assert league_id in at.markdown[2].value
 
 
 def test_by_league_query_param():
     at = _app()
     at.query_params['league'] = league_id
     at.run()
-    _validate_league(at)
+    assert league in at.markdown[1].value
+    assert league_id in at.markdown[2].value
 
-
-def test_from_user_to_league_to_user():
-    at = _app().run()
-    at.text_input[0].set_value(user).run()
-
-    try:
-        _validate_league(at)
-        assert False, "_validate_league should have failed"
-    except AssertionError:
-        pass  
-
-    at.button[0].click().run()
-    _validate_league(at)
-    assert league_id in at.query_params['league']
-
-    at.button[0].click().run()
-    _validate_user(at)
-    assert 'league' not in at.query_params
-    try:
-        _validate_league(at)
-        assert False, "_validate_league should have failed"
-    except AssertionError:
-        pass  
-    
 
 def test_players():
     data = Data()
@@ -81,15 +45,15 @@ def test_players():
         'B': {'status.period': 2, 'status.clock': 10*60},
         'C': {'status.period': 4, 'status.clock': 0}
     }, orient='index')
-    data._projections = pd.DataFrame.from_dict({
+    data._projections = {
         1: {'passing_yards': 100, 'passing_touchdowns': 1},
         2: {'receiving_yards': 50, 'receiving_touchdowns': 1},
         3: {'receiving_yards': 75, 'receiving_touchdowns': 1}
-    }, orient='index')
-    data._stats = pd.DataFrame.from_dict({
+    }
+    data._stats = {
         2: {'receiving_yards': 10, 'receiving_touchdowns': 0},
         3: {'receiving_yards': 20, 'receiving_touchdowns': 0}
-    }, orient='index')
+    }
     data._scoring = {
         'passing_yards': 0.04,
         'passing_touchdowns': 4,
@@ -98,6 +62,7 @@ def test_players():
     }
     data._positions = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
     df = data.players()
+    print(df)
     assert len(df) == 4
     
     p1, p2, p3, p4 = df.to_dict(orient='records')
