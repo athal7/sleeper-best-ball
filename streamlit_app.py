@@ -19,6 +19,7 @@ POSITION_MAPPINGS = pd.DataFrame([
     ['BN', 'BN', ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']],
 ]).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
 
+
 @dataclass
 class Data:
     _game_statuses: pd.DataFrame = None
@@ -82,6 +83,7 @@ class Data:
             columns={'display_name': 'fantasy_team'}), on='owner_id', how='left')
         return df[['fantasy_team', 'points',  'matchup_id', 'players']]
 
+
 def _leagues(season, params):
     username = params.get('username')
     locked_league_id = params.get('league')
@@ -96,8 +98,9 @@ def _leagues(season, params):
             st.warning("No leagues found for this user.")
     else:
         st.text_input("Enter your Sleeper username:", key='username_input',
-                    on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
+                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
     return leagues
+
 
 def _game_statuses(season: int, week: int):
     url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
@@ -139,6 +142,7 @@ def _live_team_projection(team: pd.DataFrame):
     projection = f"{starters['optimistic'].sum():.2f}"
     return projection
 
+
 def _style():
     st.html("""
     <style>
@@ -151,9 +155,7 @@ def _style():
         border-spacing:0; 
         padding:0; 
         text-align: left;
-    }
-    col {
-        width: 20%;
+        table-layout: fixed;
     }
     th {
         font-size: 1.5em;
@@ -165,18 +167,25 @@ def _style():
         padding: 0;
         margin: 0;
     }
+
     td.projection {
-        text-align: right;
         font-size: 0.9em;
         font-style: italic;
     }
-    td.team.actual {
+    table.summary td.actual {
         font-size: 1.2em;
+        text-align: left;
+    }
+    td.actual, td.projection, th.projection {
+        text-align: right;
     }
     td.position, th.position {
         text-align: center;
         vertical-align: middle;
         font-size: 0.9em;
+    }
+    td.player-info {
+        font-size: 0.8em;
     }
     div.label {
         margin: 0;
@@ -200,11 +209,14 @@ def _style():
     </style>
     """)
 
+
 def _is_active(pct_played: float):
     return pct_played < 1.0 and pct_played > 0.0
 
+
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
-    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'pct_played': 0.0, 'team': ''}
+    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0,
+                   'pct_played': 0.0, 'team': '', 'position': ''}
     rows = []
     for pos, row in positions.iterrows():
         t1 = team1[team1['spos'] == pos]
@@ -218,47 +230,36 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
 
         rows.append(f"""                    
             <tr>
-            <td colspan="2" class="player {'live' if _is_active(p1['pct_played']) else ''}">{p1['name']} <small>{p1['team']}</small></td>
+            <td colspan="3" class="player {'live' if _is_active(p1['pct_played']) else ''}">{p1['name']}</td>
             <td rowspan="2" class="position">{row['position']}</td>
-            <td colspan="2" class="player {'live' if _is_active(p2['pct_played']) else ''}">{p2['name']} <small>{p2['team']}</small></td>
+            <td colspan="3" class="player {'live' if _is_active(p2['pct_played']) else ''}">{p2['name']}</td>
             </tr>
             <tr>
+            <td class="player-info">{p1['position']} {p1['team']}</td>
             <td class="actual">{p1['points']:.2f}</td>
             <td class="projection">{p1['optimistic']:.2f}</td>
+            <td class="player-info">{p2['position']} {p2['team']}</td>
             <td class="actual">{p2['points']:.2f}</td>
             <td class="projection">{p2['optimistic']:.2f}</td>
             </tr>
         """)
     st.html(f"""
     <table>
-        <colgroup>
-            <col>
-            <col>
-            <col class="position">
-            <col>
-            <col>
-        </colgroup>
         <tbody>
             {''.join(rows)}
         </tbody>
     </table>
     """)
 
+
 def _matchup_display(team1, team2, positions, players):
     t1_players = _set_starting_positions(
-            players.loc[team1['players']], positions)
+        players.loc[team1['players']], positions)
     t2_players = _set_starting_positions(
-            players.loc[team2['players']], positions)
+        players.loc[team2['players']], positions)
 
     st.html(f"""
-    <table>
-        <colgroup>
-            <col>
-            <col>
-            <col class="position">
-            <col>
-            <col>
-        </colgroup>
+    <table class="summary">
         <thead>
             <tr>
                 <th colspan=2>{team1['fantasy_team']}</th>
@@ -268,19 +269,22 @@ def _matchup_display(team1, team2, positions, players):
         </thead>
         <tbody>
             <tr>
-                <td class="actual team"><div class='label'>score</div>{team1['points']:.2f}</td>
-                <td class="projection team"><div class='label'>projection</div>{_live_team_projection(t1_players)}</td>
+                <td class="actual"><div class='label'>score</div>{team1['points']:.2f}</td>
+                <td class="projection"><div class='label'>projection</div>{_live_team_projection(t1_players)}</td>
                 <td></td>
-                <td class="actual team"><div class='label'>score</div>{team2['points']:.2f}</td>
-                <td class="projection team"><div class='label'>projection</div>{_live_team_projection(t2_players)}</td>
+                <td class="actual"><div class='label'>score</div>{team2['points']:.2f}</td>
+                <td class="projection"><div class='label'>projection</div>{_live_team_projection(t2_players)}</td>
             </tr>
         </tbody>
     </table>
     """)
     with st.expander("Show players"):
-        _player_scores(positions[~positions.index.str.startswith('BN')], t1_players, t2_players)
+        _player_scores(
+            positions[~positions.index.str.startswith('BN')], t1_players, t2_players)
         with st.expander("Show bench"):
-            _player_scores(positions[positions.index.str.startswith('BN')], t1_players, t2_players)
+            _player_scores(
+                positions[positions.index.str.startswith('BN')], t1_players, t2_players)
+
 
 def main():
     _style()
@@ -306,11 +310,13 @@ def main():
         while not matchups.empty:
             team1 = matchups.iloc[0]
             matchups.drop(team1.name, inplace=True)
-            team2 = matchups[matchups['matchup_id'] == team1['matchup_id']].iloc[0]
+            team2 = matchups[matchups['matchup_id']
+                             == team1['matchup_id']].iloc[0]
             matchups.drop(team2.name, inplace=True)
             _matchup_display(team1, team2, positions, players)
 
         st.markdown(f"(League ID: {league_id})")
+
 
 if __name__ == "__main__":
     main()
