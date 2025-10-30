@@ -229,7 +229,20 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
             <td class="projection">{p2['optimistic']:.2f}</td>
             </tr>
         """)
-    return ''.join(rows)
+    st.html(f"""
+    <table>
+        <colgroup>
+            <col>
+            <col>
+            <col class="position">
+            <col>
+            <col>
+        </colgroup>
+        <tbody>
+            {''.join(rows)}
+        </tbody>
+    </table>
+    """)
 
 def _matchup_display(team1, team2, positions, players):
     t1_players = _set_starting_positions(
@@ -264,21 +277,10 @@ def _matchup_display(team1, team2, positions, players):
         </tbody>
     </table>
     """)
-    with st.expander("Show player details"):
-        st.html(f"""
-    <table>
-        <colgroup>
-            <col>
-            <col>
-            <col class="position">
-            <col>
-            <col>
-        </colgroup>
-        <tbody>
-            {_player_scores(positions, t1_players, t2_players)}
-        </tbody>
-    </table>
-    """)
+    with st.expander("Show players"):
+        _player_scores(positions[~positions.index.str.startswith('BN')], t1_players, t2_players)
+        with st.expander("Show bench"):
+            _player_scores(positions[positions.index.str.startswith('BN')], t1_players, t2_players)
 
 def main():
     _style()
