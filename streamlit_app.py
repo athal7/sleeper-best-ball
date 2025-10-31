@@ -210,12 +210,15 @@ def _style():
     """)
 
 
-def _is_active(pct_played: float):
-    return pct_played < 1.0 and pct_played > 0.0
+def _is_active(player: dict):
+    return player['pct_played'] < 1.0 and player['pct_played'] > 0.0
+
+def _is_final(player: dict):
+    return player['pct_played'] == 1
 
 
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
-    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0,
+    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
                    'pct_played': 0.0, 'team': '', 'position': ''}
     rows = []
     for pos, row in positions.iterrows():
@@ -230,17 +233,17 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
 
         rows.append(f"""                    
             <tr>
-            <td colspan="3" class="player {'live' if _is_active(p1['pct_played']) else ''}">{p1['name']}</td>
+            <td colspan="3" class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
             <td rowspan="2" class="position">{row['position']}</td>
-            <td colspan="3" class="player {'live' if _is_active(p2['pct_played']) else ''}">{p2['name']}</td>
+            <td colspan="3" class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
             </tr>
             <tr>
             <td class="player-info">{p1['position']} {p1['team']}</td>
             <td class="actual">{p1['points']:.2f}</td>
-            <td class="projection">{p1['optimistic']:.2f}</td>
+            <td class="projection">{(p1['projection'] if _is_final(p1) else p1['optimistic']):.2f}</td>
             <td class="player-info">{p2['position']} {p2['team']}</td>
             <td class="actual">{p2['points']:.2f}</td>
-            <td class="projection">{p2['optimistic']:.2f}</td>
+            <td class="projection">{(p2['projection'] if _is_final(p2) else p2['optimistic']):.2f}</td>
             </tr>
         """)
     st.html(f"""
