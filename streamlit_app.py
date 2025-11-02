@@ -257,7 +257,7 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
     st.html(f"""
     <table>
         <tbody>
-            {''.join(rows)}
+            {'<tr><td colspan="7"><hr></td></tr>'.join(rows)}
         </tbody>
     </table>
     """)
