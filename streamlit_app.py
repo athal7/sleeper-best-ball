@@ -329,7 +329,7 @@ def main():
 
     for league_id in leagues:
         league = League(league_id)
-        st.markdown(f"## {league.get_league_name()}: Week {week}")
+        st.markdown(f"## {league.get_league_name()} (Week {week})")
         data = Data.from_league(league, season, week)
         positions = data.starting_positions()
         players = data.players()
