@@ -125,8 +125,8 @@ def _points(stats: dict, scoring: dict):
     return _compute
 
 
-def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame):
-    df = team.copy().sort_values(by=['optimistic'], ascending=False)
+def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame, by='optimistic'):
+    df = team.copy().sort_values(by=[by], ascending=False)
     df['spos'] = None
     for spos, eligible in positions.iterrows():
         starter = df.loc[(df['position'].isin(eligible['eligible'])) & (
@@ -136,9 +136,9 @@ def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame):
     return df
 
 
-def _live_team_projection(team: pd.DataFrame):
+def _team_points(team: pd.DataFrame, value='optimistic'):
     starters = team[~team['spos'].str.startswith('BN')]
-    projection = f"{starters['optimistic'].sum():.2f}"
+    projection = f"{starters[value].sum():.2f}"
     return projection
 
 
@@ -274,6 +274,13 @@ def _matchup_display(team1, team2, positions, players):
     t2_players = _set_starting_positions(
         players.loc[team2['players']], positions)
 
+    t1_score = _team_points(
+        _set_starting_positions(players.loc[team1['players']], positions, by='points'),
+        'points')
+    t2_score = _team_points(
+        _set_starting_positions(players.loc[team2['players']], positions, by='points'),
+        'points')
+
     st.html(f"""
     <table class="summary">
         <thead>
@@ -296,11 +303,11 @@ def _matchup_display(team1, team2, positions, players):
                 <td class="label">projection</td>
             </tr>
             <tr>
-                <td class="actual">{team1['points']:.2f}</td>
-                <td class="projection">{_live_team_projection(t1_players)}</td>
+                <td class="actual">{t1_score}</td>
+                <td class="projection">{_team_points(t1_players)}</td>
                 <td></td>
-                <td class="actual">{team2['points']:.2f}</td>
-                <td class="projection">{_live_team_projection(t2_players)}</td>
+                <td class="actual">{t2_score}</td>
+                <td class="projection">{_team_points(t2_players)}</td>
             </tr>
         </tbody>
     </table>
