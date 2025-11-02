@@ -166,40 +166,47 @@ def _style():
     }
     td.username {
         font-size: 0.8em;
+        opacity: 0.7;
     }
     td {
         padding: 0;
         margin: 0;
     }
-    td.actual {
-        font-size: 0.9em;
-    }
     td.projection {
-        font-size: 0.8em;
         font-style: italic;
     }
-    table.summary td.actual {
-        text-align: left;
-    }
-    td.actual, td.projection, th.projection {
-        text-align: right;
+    table.players td.actual, table.players td.projection {
+        font-size: 0.9em;
     }
     td.position, th.position {
         text-align: center;
         vertical-align: middle;
         font-size: 0.6em;
+        opacity: 0.7;
     }
     td.player {
         font-size: 0.9em;
     }
     td.player-info {
         font-size: 0.7em;
+        opacity: 0.7;
     }
-    div.label {
+    td.label {
         margin: 0;
         padding: 0;
         font-size: 0.7em;
         font-style: normal;
+        opacity: 0.7;
+    }
+    hr {
+        border: none;
+        border-top: 1px solid rgba(128, 128, 128, 0.3);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        hr {
+            border-top: 1px solid rgba(255, 255, 255, 0.3);
+        }
     }
     @media (prefers-color-scheme: light) {
         td.live {
@@ -220,6 +227,7 @@ def _style():
 
 def _is_active(player: dict):
     return player['pct_played'] < 1.0 and player['pct_played'] > 0.0
+
 
 def _is_final(player: dict):
     return player['pct_played'] == 1
@@ -255,7 +263,7 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
             </tr>
         """)
     st.html(f"""
-    <table>
+    <table class="players">
         <tbody>
             {'<tr><td colspan="7"><hr></td></tr>'.join(rows)}
         </tbody>
@@ -274,22 +282,28 @@ def _matchup_display(team1, team2, positions, players):
         <thead>
             <tr>
                 <th colspan=2>{team1['fantasy_team']}</th>
-                <th class="position">vs</th>
+                <th></th>
                 <th colspan=2>{team2['fantasy_team']}</th>
             </tr>
         </thead>
         <tbody>
             <tr>
                 <td colspan=2 class="username">@{team1['username']}</td>
-                <td></td>
+                <td rowspan=2 class="position">vs</td>
                 <td colspan=2 class="username">@{team2['username']}</td>
             </tr>
             <tr>
-                <td class="actual"><div class='label'>score</div>{team1['points']:.2f}</td>
-                <td class="projection"><div class='label'>projection</div>{_live_team_projection(t1_players)}</td>
+                <td class="label">score</td>
+                <td class="label">projection</td>
+                <td class="label">score</td>
+                <td class="label">projection</td>
+            </tr>
+            <tr>
+                <td class="actual">{team1['points']:.2f}</td>
+                <td class="projection">{_live_team_projection(t1_players)}</td>
                 <td></td>
-                <td class="actual"><div class='label'>score</div>{team2['points']:.2f}</td>
-                <td class="projection"><div class='label'>projection</div>{_live_team_projection(t2_players)}</td>
+                <td class="actual">{team2['points']:.2f}</td>
+                <td class="projection">{_live_team_projection(t2_players)}</td>
             </tr>
         </tbody>
     </table>
@@ -304,16 +318,18 @@ def _matchup_display(team1, team2, positions, players):
 
 def main():
     _style()
-    st.title("Sleeper Best Ball 🏈")
-    st.markdown("*optimistic projections for best ball scoring*")
     current = get_sport_state('nfl')
     season = int(current['league_season'])
     week = int(current['display_week'])
     username = st.query_params.get('username')
+    leagues = _leagues(season, st.query_params)
+    if not leagues:
+        st.title("Sleeper Best Ball 🏈")
+        st.markdown("*optimistic projections for best ball scoring*")
 
-    for league_id in _leagues(season, st.query_params):
+    for league_id in leagues:
         league = League(league_id)
-        st.markdown(f"#### {league.get_league_name()} - Week {week}")
+        st.markdown(f"## {league.get_league_name()}: Week {week}")
         data = Data.from_league(league, season, week)
         positions = data.starting_positions()
         players = data.players()
