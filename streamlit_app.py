@@ -98,9 +98,6 @@ def _leagues(season, params):
         leagues = [l['league_id'] for l in user.get_all_leagues('nfl', season)]
         if not leagues:
             st.warning("No leagues found for this user.")
-    else:
-        st.text_input("Enter your Sleeper username:", key='username_input',
-                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
     return leagues
 
 
@@ -321,11 +318,13 @@ def main():
     current = get_sport_state('nfl')
     season = int(current['league_season'])
     week = int(current['display_week'])
-    username = st.query_params.get('username')
     leagues = _leagues(season, st.query_params)
+    username = st.query_params.get('username')
     if not leagues:
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
+        st.text_input("Enter your Sleeper username:", key='username_input',
+                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
 
     for league_id in leagues:
         league = League(league_id)
