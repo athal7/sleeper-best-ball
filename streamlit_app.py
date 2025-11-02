@@ -40,7 +40,7 @@ class Data:
             _rosters=pd.DataFrame(league.get_rosters()).set_index(
                 'roster_id')[['owner_id']],
             _users=pd.DataFrame(league.get_users()).set_index(
-                'user_id')[['display_name']],
+                'user_id')[['display_name', 'metadata']],
             _players=pd.DataFrame.from_dict(
                 Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']],
             _projections=Stats().get_week_projections("regular", season, week),
@@ -80,8 +80,10 @@ class Data:
         df = self._matchups
         df = df.join(self._rosters, on='roster_id', how='left')
         df = df.join(self._users.rename(
-            columns={'display_name': 'fantasy_team'}), on='owner_id', how='left')
-        return df[['fantasy_team', 'points',  'matchup_id', 'players']]
+            columns={'display_name': 'username'}), on='owner_id', how='left')
+        df['fantasy_team'] = df.apply(
+            lambda row: row['metadata'].get('team_name') or f"Team {row['username']}", axis=1)
+        return df[['fantasy_team', 'username', 'points',  'matchup_id', 'players']]
 
 
 def _leagues(season, params):
@@ -158,22 +160,25 @@ def _style():
         table-layout: fixed;
     }
     th {
-        font-size: 1.5em;
         font-weight: normal;
         padding: 0;
         margin: 0;
+    }
+    td.username {
+        font-size: 0.8em;
     }
     td {
         padding: 0;
         margin: 0;
     }
-
-    td.projection {
+    td.actual {
         font-size: 0.9em;
+    }
+    td.projection {
+        font-size: 0.8em;
         font-style: italic;
     }
     table.summary td.actual {
-        font-size: 1.2em;
         text-align: left;
     }
     td.actual, td.projection, th.projection {
@@ -182,10 +187,13 @@ def _style():
     td.position, th.position {
         text-align: center;
         vertical-align: middle;
+        font-size: 0.6em;
+    }
+    td.player {
         font-size: 0.9em;
     }
     td.player-info {
-        font-size: 0.8em;
+        font-size: 0.7em;
     }
     div.label {
         margin: 0;
@@ -272,6 +280,11 @@ def _matchup_display(team1, team2, positions, players):
         </thead>
         <tbody>
             <tr>
+                <td colspan=2 class="username">@{team1['username']}</td>
+                <td></td>
+                <td colspan=2 class="username">@{team2['username']}</td>
+            </tr>
+            <tr>
                 <td class="actual"><div class='label'>score</div>{team1['points']:.2f}</td>
                 <td class="projection"><div class='label'>projection</div>{_live_team_projection(t1_players)}</td>
                 <td></td>
@@ -306,8 +319,7 @@ def main():
         players = data.players()
         matchups = data.matchups()
         if username:
-            user_matchup = matchups[matchups['fantasy_team'].str.contains(
-                username)]
+            user_matchup = matchups[matchups['username'] == username]
             matchups.drop(user_matchup.index, inplace=True)
             matchups = pd.concat([user_matchup, matchups])
         while not matchups.empty:
