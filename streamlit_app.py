@@ -169,6 +169,7 @@ def _style():
         font-size: 0.8em;
         opacity: 0.7;
         line-height: 1.5em;
+        font-style: italic;
     }
     td {
         padding: 0;
