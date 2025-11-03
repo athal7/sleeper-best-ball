@@ -49,7 +49,7 @@ class Data:
 
     def players(self):
         df = self._players.copy(
-        )[['team', 'first_name', 'last_name', 'position']]
+        )[['team', 'first_name', 'last_name', 'position', 'injury_status']]
         df = df[df['team'].notna()]
         df['name'] = df.apply(
             lambda row: f"{row['first_name'][0]}. {row['last_name']}", axis=1)
@@ -65,7 +65,7 @@ class Data:
             _points(self._projections, self._scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
-        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye']]
+        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status']]
 
     def starting_positions(self):
         df = POSITION_MAPPINGS.copy()
@@ -243,6 +243,8 @@ def _is_final(player: dict):
 def _show_projection(player: dict):
     if player['bye']:
         return "BYE"
+    elif player['injury_status'] in ['IR', 'Out']:
+        return "OUT"
     elif _is_final(player):
         return f"{player['projection']:.2f}"
     else:
@@ -250,7 +252,7 @@ def _show_projection(player: dict):
     
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
     null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
-                   'pct_played': 0.0, 'team': '', 'position': '', 'bye': False}
+                   'pct_played': 0.0, 'team': '', 'position': '', 'bye': False, 'injury_status': ''}
     rows = []
     for pos, row in positions.iterrows():
         t1 = team1[team1['spos'] == pos]
