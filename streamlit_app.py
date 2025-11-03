@@ -199,6 +199,12 @@ def _style():
         font-size: 0.7em;
         opacity: 0.7;
     }
+    td.player-status {
+        font-size: 0.7em;
+        font-style: italic;
+        opacity: 0.7;
+        line-height: 0.7em;
+    }
     td.label {
         margin: 0;
         padding: 0;
@@ -254,14 +260,24 @@ def _show_points(player: dict):
     return f"{player['points']:.2f}"
 
 def _show_projection(player: dict):
+    if player['bye'] or _is_out(player):
+        return "-"
+    elif _is_final(player):
+        return f"{player['projection']:.2f}"
+    else:
+        return f"{player['optimistic']:.2f}"
+
+def _player_status(player: dict):
     if player['bye']:
         return "BYE"
     elif _is_out(player):
         return "OUT"
     elif _is_final(player):
-        return f"{player['projection']:.2f}"
+        return "FINAL"
+    elif _is_active(player):
+        return "LIVE"
     else:
-        return f"{player['optimistic']:.2f}"
+        return "UPCOMING"
     
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
     null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
@@ -281,7 +297,7 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
             <tr>
             <td colspan=2 class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
             <td class="actual">{_show_points(p1)}</td>
-            <td rowspan=2 class="position">{row['position']}</td>
+            <td rowspan=3 class="position">{row['position']}</td>
             <td colspan=2 class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
             <td class="actual">{_show_points(p2)}</td>
             </tr>
@@ -290,6 +306,10 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
             <td class="projection">{_show_projection(p1)}</td>
             <td colspan=2 class="player-info">{p2['position']} - {p2['team']}</td>
             <td class="projection">{_show_projection(p2)}</td>
+            </tr>
+            <tr>
+            <td colspan=3 class="player-status">{_player_status(p1)}</td>
+            <td colspan=3 class="player-status">{_player_status(p2)}</td>
             </tr>
         """)
     st.html(f"""
