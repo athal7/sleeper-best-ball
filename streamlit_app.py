@@ -159,21 +159,22 @@ def _style():
     td.username {
         font-size: 0.8em;
         opacity: 0.7;
+        line-height: 0.8em;
     }
     td {
         padding: 0;
         margin: 0;
     }
     td.actual {
-        text-align: right;
-    }
-    td.actual {
         font-size: 0.9em;
+        text-align: right;
+        line-height: 0.9em;
     }
     td.projection {
         opacity: 0.7;
         font-size: 0.8em;
         text-align: right;
+        line-height: 0.8em;
     }
     td.position {
         text-align: center;
@@ -183,9 +184,11 @@ def _style():
     }
     td.player {
         font-size: 0.9em;
+        line-height: 0.9em;
     }
     td.player-info {
         font-size: 0.7em;
+
         opacity: 0.7;
     }
     td.label {
@@ -196,8 +199,8 @@ def _style():
         opacity: 0.7;
     }
     img.avatar {
-        width: 40px;
-        height: 40px;
+        width: 35px;
+        height: 35px;
         border-radius: 20px;
     }
     hr {
