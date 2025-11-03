@@ -37,12 +37,10 @@ class Data:
         return Data(
             _game_statuses=_game_statuses(season, week),
             _matchups=pd.DataFrame(league.get_matchups(week)),
-            _rosters=pd.DataFrame(league.get_rosters()).set_index(
-                'roster_id')[['owner_id']],
-            _users=pd.DataFrame(league.get_users()).set_index(
-                'user_id')[['display_name', 'metadata']],
+            _rosters=pd.DataFrame(league.get_rosters()).set_index('roster_id'),
+            _users=pd.DataFrame(league.get_users()).set_index('user_id'),
             _players=pd.DataFrame.from_dict(
-                Players().get_all_players("nfl"), orient='index')[['team', 'first_name', 'last_name', 'position']],
+                Players().get_all_players("nfl"), orient='index'),
             _projections=Stats().get_week_projections("regular", season, week),
             _stats=Stats().get_week_stats("regular", season, week),
             _scoring=league.get_league()['scoring_settings'],
@@ -50,7 +48,8 @@ class Data:
         )
 
     def players(self):
-        df = self._players.copy()
+        df = self._players.copy(
+        )[['team', 'first_name', 'last_name', 'position']]
         df = df[df['team'].notna()]
         df['name'] = df.apply(
             lambda row: f"{row['first_name'][0]}. {row['last_name']}", axis=1)
@@ -78,12 +77,13 @@ class Data:
 
     def matchups(self):
         df = self._matchups
-        df = df.join(self._rosters, on='roster_id', how='left')
-        df = df.join(self._users.rename(
-            columns={'display_name': 'username'}), on='owner_id', how='left')
+        df = df.join(self._rosters[['owner_id']], on='roster_id', how='left')
+        users = self._users[['avatar', 'display_name', 'metadata']].rename(
+            columns={'display_name': 'username'})
+        df = df.join(users, on='owner_id', how='left')
         df['fantasy_team'] = df.apply(
             lambda row: row['metadata'].get('team_name') or f"Team {row['username']}", axis=1)
-        return df[['fantasy_team', 'username', 'points',  'matchup_id', 'players']]
+        return df[['fantasy_team', 'username', 'points',  'matchup_id', 'players', 'avatar']]
 
 
 def _leagues(season, params):
@@ -156,11 +156,6 @@ def _style():
         text-align: left;
         table-layout: fixed;
     }
-    th {
-        font-weight: normal;
-        padding: 0;
-        margin: 0;
-    }
     td.username {
         font-size: 0.8em;
         opacity: 0.7;
@@ -169,13 +164,21 @@ def _style():
         padding: 0;
         margin: 0;
     }
-    td.projection {
-        font-style: italic;
+    td.actual {
+        text-align: right;
     }
-    table.players td.actual, table.players td.projection {
+    td.projection {
+        opacity: 0.7;
+        font-size: 0.8em;
+        text-align: right;
+    }
+    table.players td.actual {
         font-size: 0.9em;
     }
-    td.position, th.position {
+    table.players td.projection {
+        font-size: 0.7em;
+    }
+    td.position {
         text-align: center;
         vertical-align: middle;
         font-size: 0.6em;
@@ -194,6 +197,11 @@ def _style():
         font-size: 0.7em;
         font-style: normal;
         opacity: 0.7;
+    }
+    img.avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 20px;
     }
     hr {
         border: none;
@@ -246,16 +254,16 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
 
         rows.append(f"""                    
             <tr>
-            <td colspan="3" class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
-            <td rowspan="2" class="position">{row['position']}</td>
-            <td colspan="3" class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
+            <td colspan=2 class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
+            <td class="actual">{p1['points']:.2f}</td>
+            <td rowspan=2 class="position">{row['position']}</td>
+            <td colspan=2 class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
+            <td class="actual">{p2['points']:.2f}</td>
             </tr>
             <tr>
-            <td class="player-info">{p1['position']} {p1['team']}</td>
-            <td class="actual">{p1['points']:.2f}</td>
+            <td colspan=2 class="player-info">{p1['position']} - {p1['team']}</td>
             <td class="projection">{(p1['projection'] if _is_final(p1) else p1['optimistic']):.2f}</td>
-            <td class="player-info">{p2['position']} {p2['team']}</td>
-            <td class="actual">{p2['points']:.2f}</td>
+            <td colspan=2 class="player-info">{p2['position']} - {p2['team']}</td>
             <td class="projection">{(p2['projection'] if _is_final(p2) else p2['optimistic']):.2f}</td>
             </tr>
         """)
@@ -275,39 +283,35 @@ def _matchup_display(team1, team2, positions, players):
         players.loc[team2['players']], positions)
 
     t1_score = _team_points(
-        _set_starting_positions(players.loc[team1['players']], positions, by='points'),
+        _set_starting_positions(
+            players.loc[team1['players']], positions, by='points'),
         'points')
     t2_score = _team_points(
-        _set_starting_positions(players.loc[team2['players']], positions, by='points'),
+        _set_starting_positions(
+            players.loc[team2['players']], positions, by='points'),
         'points')
 
     st.html(f"""
     <table class="summary">
-        <thead>
-            <tr>
-                <th colspan=2>{team1['fantasy_team']}</th>
-                <th></th>
-                <th colspan=2>{team2['fantasy_team']}</th>
-            </tr>
-        </thead>
         <tbody>
             <tr>
-                <td colspan=2 class="username">@{team1['username']}</td>
-                <td rowspan=2 class="position">vs</td>
-                <td colspan=2 class="username">@{team2['username']}</td>
-            </tr>
-            <tr>
-                <td class="label">score</td>
-                <td class="label">projection</td>
-                <td class="label">score</td>
-                <td class="label">projection</td>
-            </tr>
-            <tr>
+                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1['avatar']}"></td>
                 <td class="actual">{t1_score}</td>
-                <td class="projection">{_team_points(t1_players)}</td>
-                <td></td>
+                <td rowspan=4 class="position">vs</td>
+                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2['avatar']}"></td>
                 <td class="actual">{t2_score}</td>
+            </tr>
+            <tr>
+                <td class="projection">{_team_points(t1_players)}</td>
                 <td class="projection">{_team_points(t2_players)}</td>
+            </tr>
+            <tr>
+                <td colspan=3>{team1['fantasy_team']}</td>
+                <td colspan=3>{team2['fantasy_team']}</td>
+            </tr>
+            <tr>
+                <td colspan=3 class="username">@{team1['username']}</td>
+                <td colspan=3 class="username">@{team2['username']}</td>
             </tr>
         </tbody>
     </table>
