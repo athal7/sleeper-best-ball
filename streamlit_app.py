@@ -240,6 +240,11 @@ def _is_active(player: dict):
 def _is_final(player: dict):
     return player['pct_played'] == 1
 
+def _show_points(player: dict):
+    if player['bye'] or player['injury_status'] in ['IR', 'Out']:
+        return "-"
+    return f"{player['points']:.2f}"
+
 def _show_projection(player: dict):
     if player['bye']:
         return "BYE"
@@ -267,10 +272,10 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
         rows.append(f"""                    
             <tr>
             <td colspan=2 class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
-            <td class="actual">{p1['points']:.2f}</td>
+            <td class="actual">{_show_points(p1)}</td>
             <td rowspan=2 class="position">{row['position']}</td>
             <td colspan=2 class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
-            <td class="actual">{p2['points']:.2f}</td>
+            <td class="actual">{_show_points(p2)}</td>
             </tr>
             <tr>
             <td colspan=2 class="player-info">{p1['position']} - {p1['team']}</td>
