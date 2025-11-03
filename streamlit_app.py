@@ -136,10 +136,12 @@ def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame, by='opt
     return df
 
 
-def _team_points(team: pd.DataFrame, value='optimistic'):
-    starters = team[~team['spos'].str.startswith('BN')]
-    projection = f"{starters[value].sum():.2f}"
-    return projection
+def _team_points(team: pd.DataFrame, positions: pd.DataFrame, value='optimistic'):
+    df = team.copy()
+    df = _set_starting_positions(df, positions, by=value)
+    starters = df[~df['spos'].str.startswith('BN')]
+    points = f"{starters[value].sum():.2f}"
+    return points
 
 
 def _style():
@@ -188,7 +190,6 @@ def _style():
     }
     td.player-info {
         font-size: 0.7em;
-
         opacity: 0.7;
     }
     td.label {
@@ -277,33 +278,22 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
 
 
 def _matchup_display(team1, team2, positions, players):
-    t1_players = _set_starting_positions(
-        players.loc[team1['players']], positions)
-    t2_players = _set_starting_positions(
-        players.loc[team2['players']], positions)
-
-    t1_score = _team_points(
-        _set_starting_positions(
-            players.loc[team1['players']], positions, by='points'),
-        'points')
-    t2_score = _team_points(
-        _set_starting_positions(
-            players.loc[team2['players']], positions, by='points'),
-        'points')
+    t1_players = players.loc[team1['players']]
+    t2_players = players.loc[team2['players']]  
 
     st.html(f"""
     <table class="summary">
         <tbody>
             <tr>
                 <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1['avatar']}"></td>
-                <td class="actual">{t1_score}</td>
+                <td class="actual">{_team_points(t1_players, positions, 'points')}</td>
                 <td rowspan=4 class="position">vs</td>
                 <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2['avatar']}"></td>
-                <td class="actual">{t2_score}</td>
+                <td class="actual">{_team_points(t2_players, positions, 'points')}</td>
             </tr>
             <tr>
-                <td class="projection">{_team_points(t1_players)}</td>
-                <td class="projection">{_team_points(t2_players)}</td>
+                <td class="projection">{_team_points(t1_players, positions, 'optimistic')}</td>
+                <td class="projection">{_team_points(t2_players, positions, 'optimistic')}</td>
             </tr>
             <tr>
                 <td colspan=3>{team1['fantasy_team']}</td>
@@ -316,6 +306,8 @@ def _matchup_display(team1, team2, positions, players):
         </tbody>
     </table>
     """)
+    t1_players = _set_starting_positions(t1_players, positions)
+    t2_players = _set_starting_positions(t2_players, positions)
     with st.expander("Show players"):
         _player_scores(
             positions[~positions.index.str.startswith('BN')], t1_players, t2_players)
