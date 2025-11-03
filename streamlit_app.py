@@ -163,7 +163,12 @@ def _style():
     td.username {
         font-size: 0.8em;
         opacity: 0.7;
-        line-height: 0.8em;
+        line-height: 1em;
+    }
+    td.yet-to-play {
+        font-size: 0.8em;
+        opacity: 0.7;
+        line-height: 1.5em;
     }
     td {
         padding: 0;
@@ -295,6 +300,10 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
     </table>
     """)
 
+def _yet_to_play(team):
+    expected = team[team['projection'] > 0]
+    played = expected[(expected['pct_played'] == 1)]
+    return f"{len(played)} / {len(expected)} played"
 
 def _matchup_display(team1, team2, positions, players):
     t1_players = players.loc[team1['players']]
@@ -306,7 +315,7 @@ def _matchup_display(team1, team2, positions, players):
             <tr>
                 <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1['avatar']}"></td>
                 <td class="actual">{_team_points(t1_players, positions, 'points')}</td>
-                <td rowspan=4 class="position">vs</td>
+                <td rowspan=5 class="position">vs</td>
                 <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2['avatar']}"></td>
                 <td class="actual">{_team_points(t2_players, positions, 'points')}</td>
             </tr>
@@ -321,6 +330,10 @@ def _matchup_display(team1, team2, positions, players):
             <tr>
                 <td colspan=3 class="username">@{team1['username']}</td>
                 <td colspan=3 class="username">@{team2['username']}</td>
+            </tr>
+            <tr>
+                <td colspan=3 class="yet-to-play">{_yet_to_play(t1_players)}</td>
+                <td colspan=3 class="yet-to-play">{_yet_to_play(t2_players)}</td>
             </tr>
         </tbody>
     </table>
