@@ -240,15 +240,18 @@ def _is_active(player: dict):
 def _is_final(player: dict):
     return player['pct_played'] == 1
 
+def _is_out(player):
+    return player['injury_status'] in ['IR', 'Out'] and player['points'] == 0 and player['projection'] == 0
+
 def _show_points(player: dict):
-    if player['bye'] or player['injury_status'] in ['IR', 'Out']:
+    if _is_out(player) or player['bye']:
         return "-"
     return f"{player['points']:.2f}"
 
 def _show_projection(player: dict):
     if player['bye']:
         return "BYE"
-    elif player['injury_status'] in ['IR', 'Out']:
+    elif _is_out(player):
         return "OUT"
     elif _is_final(player):
         return f"{player['projection']:.2f}"
