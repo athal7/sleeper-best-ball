@@ -167,16 +167,13 @@ def _style():
     td.actual {
         text-align: right;
     }
+    td.actual {
+        font-size: 0.9em;
+    }
     td.projection {
         opacity: 0.7;
         font-size: 0.8em;
         text-align: right;
-    }
-    table.players td.actual {
-        font-size: 0.9em;
-    }
-    table.players td.projection {
-        font-size: 0.7em;
     }
     td.position {
         text-align: center;
