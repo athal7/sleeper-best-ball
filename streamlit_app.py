@@ -57,13 +57,15 @@ class Data:
         df['pct_played'] = (df['status.period'] * 15 -
                             df['status.clock'] / 60) / 60
         df['pct_played'] = df['pct_played'].clip(0, 1)
+        df['bye'] = False
+        df.loc[df['pct_played'].isna(), 'bye'] = True
         df.loc[df['pct_played'].isna(), 'pct_played'] = 0
         df['points'] = df.apply(_points(self._stats, self._scoring), axis=1)
         df['projection'] = df.apply(
             _points(self._projections, self._scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
-        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic']]
+        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye']]
 
     def starting_positions(self):
         df = POSITION_MAPPINGS.copy()
@@ -238,10 +240,17 @@ def _is_active(player: dict):
 def _is_final(player: dict):
     return player['pct_played'] == 1
 
-
+def _show_projection(player: dict):
+    if player['bye']:
+        return "BYE"
+    elif _is_final(player):
+        return f"{player['projection']:.2f}"
+    else:
+        return f"{player['optimistic']:.2f}"
+    
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
     null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
-                   'pct_played': 0.0, 'team': '', 'position': ''}
+                   'pct_played': 0.0, 'team': '', 'position': '', 'bye': False}
     rows = []
     for pos, row in positions.iterrows():
         t1 = team1[team1['spos'] == pos]
@@ -263,9 +272,9 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
             </tr>
             <tr>
             <td colspan=2 class="player-info">{p1['position']} - {p1['team']}</td>
-            <td class="projection">{(p1['projection'] if _is_final(p1) else p1['optimistic']):.2f}</td>
+            <td class="projection">{_show_projection(p1)}</td>
             <td colspan=2 class="player-info">{p2['position']} - {p2['team']}</td>
-            <td class="projection">{(p2['projection'] if _is_final(p2) else p2['optimistic']):.2f}</td>
+            <td class="projection">{_show_projection(p2)}</td>
             </tr>
         """)
     st.html(f"""
