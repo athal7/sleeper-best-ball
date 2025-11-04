@@ -233,6 +233,7 @@ def _style():
     </style>
     """)
 
+
 @dataclass
 class PlayerDisplay:
     name: str
@@ -251,7 +252,7 @@ class PlayerDisplay:
     def null_player(cls) -> 'PlayerDisplay':
         return cls(name='-', position='', team='', points=0.0, projection=0.0,
                    optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='')
-    
+
     @property
     def status(self) -> str:
         if self.bye:
@@ -264,7 +265,7 @@ class PlayerDisplay:
             return "LIVE"
         else:
             return "UPCOMING"
-        
+
     @property
     def is_active(self) -> bool:
         return self.pct_played < 1.0 and self.pct_played > 0.0
@@ -292,6 +293,7 @@ class PlayerDisplay:
         else:
             return f"{self.optimistic:.2f}"
 
+
 @dataclass
 class TeamDisplay:
     fantasy_team: str
@@ -299,12 +301,13 @@ class TeamDisplay:
     avatar: str
     matchup_id: str
     players: list[PlayerDisplay]
-    
+
     @classmethod
     def from_df(cls, df: pd.Series, players: pd.DataFrame, positions: pd.DataFrame) -> 'TeamDisplay':
         players = players.loc[df['players']]
         players = _set_starting_positions(players, positions)
-        players = [PlayerDisplay(**p) for p in players.to_dict(orient='records')]
+        players = [PlayerDisplay(**p)
+                   for p in players.to_dict(orient='records')]
         return cls(
             fantasy_team=df['fantasy_team'],
             username=df['username'],
@@ -312,11 +315,11 @@ class TeamDisplay:
             matchup_id=df['matchup_id'],
             players=players
         )
-    
+
     @property
     def starters(self) -> list[PlayerDisplay]:
         return [p for p in self.players if not p.spos.startswith('BN')]
-    
+
     @property
     def bench(self) -> list[PlayerDisplay]:
         return [p for p in self.players if p.spos.startswith('BN')]
@@ -328,21 +331,28 @@ class TeamDisplay:
     @property
     def played(self) -> list[PlayerDisplay]:
         return [p for p in self.active_players if p.is_final]
-    
+
     @property
     def projection(self) -> float:
         return f"{sum(p.optimistic for p in self.starters):.2f}"
 
     @property
     def points(self) -> float:
-        return f"{sum(p.points for p in self.players if p.current_position != 'BN'):.2f}"
+        return f"{sum(p.points for p in self.players if not p.current_position.startswith('BN')):.2f}"
+    
+    
+    def player(self, position: str) -> PlayerDisplay:
+        for p in self.players:
+            if p.spos == position:
+                return p
+        return PlayerDisplay.null_player()
 
 
-def _player_scores(positions: pd.DataFrame, team1: list[PlayerDisplay], team2: list[PlayerDisplay]):
+def _player_scores(positions: pd.DataFrame, team1: TeamDisplay, team2: TeamDisplay):
     rows = []
     for pos, row in positions.iterrows():
-        p1 = [p for p in team1 if p.spos == pos][0] or PlayerDisplay.null_player()
-        p2 = [p for p in team2 if p.spos == pos][0] or PlayerDisplay.null_player()
+        p1 = team1.player(pos)
+        p2 = team2.player(pos)
 
         rows.append(f"""                    
             <tr>
@@ -370,6 +380,7 @@ def _player_scores(positions: pd.DataFrame, team1: list[PlayerDisplay], team2: l
         </tbody>
     </table>
     """)
+
 
 def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataFrame):
     st.html(f"""
@@ -403,10 +414,10 @@ def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataF
     """)
     with st.expander("Show players"):
         _player_scores(
-            positions[~positions.index.str.startswith('BN')], team1.starters, team2.starters)
-        with st.expander("Show bench"):
-            _player_scores(
-                    positions[positions.index.str.startswith('BN')], team1.bench, team2.bench)
+            positions[~positions.index.str.startswith('BN')], team1, team2)
+    with st.expander("Show bench"):
+        _player_scores(
+            positions[positions.index.str.startswith('BN')], team1, team2)
 
 
 def main():
@@ -425,7 +436,8 @@ def main():
     for league_id in leagues:
         league = League(league_id)
         st.markdown(f"## {league.get_league_name()}")
-        st.number_input("Week", min_value=1, max_value=18, key='week', value=week)
+        st.number_input("Week", min_value=1, max_value=18,
+                        key='week', value=week)
 
         data = Data.from_league(league, season, week)
         positions = data.starting_positions()
@@ -440,7 +452,8 @@ def main():
             matchups.drop(t1_df.name, inplace=True)
             team1 = TeamDisplay.from_df(t1_df, players, positions)
 
-            t2_df = matchups[matchups['matchup_id'] == team1.matchup_id].iloc[0]
+            t2_df = matchups[matchups['matchup_id']
+                             == team1.matchup_id].iloc[0]
             matchups.drop(t2_df.name, inplace=True)
             team2 = TeamDisplay.from_df(t2_df, players, positions)
 
