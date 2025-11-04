@@ -204,7 +204,7 @@ def _style():
         font-size: 0.7em;
         font-style: italic;
         opacity: 0.7;
-        line-height: 0.7em;
+        line-height: 1em;
     }
     td.label {
         margin: 0;
