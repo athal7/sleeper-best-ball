@@ -35,10 +35,11 @@ def test_by_league_query_param():
 def test_players():
     data = Data()
     data._players = pd.DataFrame.from_dict({
-        1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB'},
-        2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR'},
-        3: {'first_name': 'Player', 'last_name': 'Three', 'team': 'C', 'position': 'TE'},   
-        4: {'first_name': 'Player', 'last_name': 'Four', 'team': 'D', 'position': 'RB'}
+        1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB', 'injury_status': None},
+        2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR', 'injury_status': None},
+        3: {'first_name': 'Player', 'last_name': 'Three', 'team': 'C', 'position': 'TE', 'injury_status': None},
+        4: {'first_name': 'Player', 'last_name': 'Four', 'team': 'D', 'position': 'RB', 'injury_status': None},
+        5: {'first_name': 'Player', 'last_name': 'Five', 'team': 'C', 'position': 'K', 'injury_status': "Out"}
     }, orient='index')
     data._game_statuses = pd.DataFrame.from_dict({
         'A': {'status.period': 1, 'status.clock': 15*60},
@@ -63,39 +64,31 @@ def test_players():
     data._positions = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
     df = data.players()
     print(df)
-    assert len(df) == 4
+    assert df['name'].tolist() == ['P. One', 'P. Two', 'P. Three', 'P. Four', 'P. Five']
+    assert df['position'].tolist() == ['QB', 'WR', 'TE', 'RB', 'K']
+    assert df['team'].tolist() == ['A', 'B', 'C', 'D', 'C']
+    assert df['pct_played'].tolist() == [0, 1/3, 1, 0, 1]
     
-    p1, p2, p3, p4 = df.to_dict(orient='records')
-    assert p1['name'] == 'P. One'
-    assert p1['position'] == 'QB'
-    assert p1['team'] == 'A'
+    p1, p2, p3, p4, p5 = df.to_dict(orient='records')
     assert p1['points'] == 0
     assert round(p1['projection'], 2) == round((100*0.04 + 1*4), 2)
     assert p1['optimistic'] == p1['projection']
-    assert p1['pct_played'] == 0
-
-    assert p2['name'] == 'P. Two'
-    assert p2['position'] == 'WR'
-    assert p2['team'] == 'B'
+    
     assert round(p2['points'], 2) == round(10*0.1, 2)
     assert round(p2['projection'], 2) == round((50*0.1 + 1*6), 2)
     assert round(p2['optimistic'], 2) == round(p2['points'] + (2/3)*p2['projection'], 2)
-    assert p2['pct_played'] == 1/3
-
-    assert p3['name'] == 'P. Three'
-    assert p3['position'] == 'TE'
+    
     assert round(p3['points']) == round(20*0.1, 2)
     assert round(p3['projection'], 2) == round((75*0.1 + 1*6), 2)
     assert p3['optimistic'] == p3['points']
-    assert p3['pct_played'] == 1
-
-    assert p4['name'] == 'P. Four'
-    assert p4['position'] == 'RB'
-    assert p4['team'] == 'D'
+    
     assert p4['points'] == 0
     assert p4['projection'] == 0
     assert p4['optimistic'] == 0
-    assert p4['pct_played'] == 0
+    
+    assert p5['points'] == 0
+    assert p5['projection'] == 0
+    assert p5['optimistic'] == 0
 
 
 def test_starting_positions():
