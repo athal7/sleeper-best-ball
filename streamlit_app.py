@@ -370,8 +370,7 @@ def main():
     _style()
     current = get_sport_state('nfl')
     season = int(current['league_season'])
-    if 'week' not in st.session_state:
-        st.session_state.week = int(current['display_week'])
+    week = st.session_state.get('week') or int(current['display_week'])
     leagues = _leagues(season, st.query_params)
     username = st.query_params.get('username')
     if not leagues:
@@ -383,9 +382,9 @@ def main():
     for league_id in leagues:
         league = League(league_id)
         st.markdown(f"## {league.get_league_name()}")
-        st.number_input("Week", min_value=1, max_value=18, key='week')
+        st.number_input("Week", min_value=1, max_value=18, key='week', value=week)
 
-        data = Data.from_league(league, season, st.session_state.week)
+        data = Data.from_league(league, season, week)
         positions = data.starting_positions()
         players = data.players()
         matchups = data.matchups()
