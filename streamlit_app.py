@@ -213,6 +213,9 @@ def _style():
         font-style: normal;
         opacity: 0.7;
     }
+    td.live {
+        font-weight: bold;
+    }
     img.avatar {
         width: 35px;
         height: 35px;
@@ -226,19 +229,6 @@ def _style():
     @media (prefers-color-scheme: dark) {
         hr {
             border-top: 1px solid rgba(255, 255, 255, 0.3);
-        }
-    }
-    @media (prefers-color-scheme: light) {
-        td.live {
-            background: #fff3b0;
-            color: #000;
-        }
-    }
-
-    @media (prefers-color-scheme: dark) {
-        td.live {
-            background: #3b2f00;
-            color: #fff6d0;
         }
     }
     </style>
