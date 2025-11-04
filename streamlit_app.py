@@ -252,13 +252,16 @@ def _is_active(player: dict):
 def _is_final(player: dict):
     return player['pct_played'] == 1
 
+
 def _is_out(player):
     return player['injury_status'] in ['IR', 'Out'] and player['points'] == 0 and player['projection'] == 0
+
 
 def _show_points(player: dict):
     if _is_out(player) or player['bye']:
         return "-"
     return f"{player['points']:.2f}"
+
 
 def _show_projection(player: dict):
     if player['bye'] or _is_out(player):
@@ -267,6 +270,7 @@ def _show_projection(player: dict):
         return f"{player['projection']:.2f}"
     else:
         return f"{player['optimistic']:.2f}"
+
 
 def _player_status(player: dict):
     if player['bye']:
@@ -279,7 +283,8 @@ def _player_status(player: dict):
         return "LIVE"
     else:
         return "UPCOMING"
-    
+
+
 def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
     null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
                    'pct_played': 0.0, 'team': '', 'position': '', 'bye': False, 'injury_status': ''}
@@ -321,14 +326,16 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
     </table>
     """)
 
+
 def _yet_to_play(team):
     expected = team[team['projection'] > 0]
     played = expected[(expected['pct_played'] == 1)]
     return f"{len(played)} / {len(expected)} played"
 
+
 def _matchup_display(team1, team2, positions, players):
     t1_players = players.loc[team1['players']]
-    t2_players = players.loc[team2['players']]  
+    t2_players = players.loc[team2['players']]
 
     st.html(f"""
     <table class="summary">
@@ -373,7 +380,8 @@ def main():
     _style()
     current = get_sport_state('nfl')
     season = int(current['league_season'])
-    week = int(current['display_week'])
+    if 'week' not in st.session_state:
+        st.session_state.week = int(current['display_week'])
     leagues = _leagues(season, st.query_params)
     username = st.query_params.get('username')
     if not leagues:
@@ -384,8 +392,11 @@ def main():
 
     for league_id in leagues:
         league = League(league_id)
-        st.markdown(f"## {league.get_league_name()} (wk{week})")
-        data = Data.from_league(league, season, week)
+        st.markdown(f"## {league.get_league_name()}")
+        st.number_input("Week", min_value=1, max_value=18,
+                        value=st.session_state.week, key='week',)
+
+        data = Data.from_league(league, season, st.session_state.week)
         positions = data.starting_positions()
         players = data.players()
         matchups = data.matchups()
