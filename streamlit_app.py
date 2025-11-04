@@ -415,9 +415,9 @@ def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataF
     with st.expander("Show players"):
         _player_scores(
             positions[~positions.index.str.startswith('BN')], team1, team2)
-    with st.expander("Show bench"):
-        _player_scores(
-            positions[positions.index.str.startswith('BN')], team1, team2)
+        with st.expander("Show bench"):
+            _player_scores(
+                positions[positions.index.str.startswith('BN')], team1, team2)
 
 
 def main():
