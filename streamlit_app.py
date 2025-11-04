@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 from sleeper_wrapper import League, User, get_sport_state, Stats, Players, League
 import requests
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from typing import Optional
 
 TEAM_MAPPINGS = {
     'WSH': 'WAS',
@@ -127,23 +128,21 @@ def _points(stats: dict, scoring: dict):
     return _compute
 
 
-def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame, by='optimistic'):
-    df = team.copy().sort_values(by=[by], ascending=False)
-    df['spos'] = None
-    for spos, eligible in positions.iterrows():
-        starter = df.loc[(df['position'].isin(eligible['eligible'])) & (
-            df['spos'].isnull()), 'spos'].head(1).index
-        df.loc[starter, 'spos'] = spos
-    df = df[df['spos'].notnull()]
-    return df
-
-
-def _team_points(team: pd.DataFrame, positions: pd.DataFrame, value='optimistic'):
+def _set_starting_positions(team: pd.DataFrame, positions: pd.DataFrame):
+    cols = {
+        'optimistic': 'spos',
+        'points': 'current_position',
+    }
     df = team.copy()
-    df = _set_starting_positions(df, positions, by=value)
-    starters = df[~df['spos'].str.startswith('BN')]
-    points = f"{starters[value].sum():.2f}"
-    return points
+    for by, col in cols.items():
+        df = df.sort_values(by=[by], ascending=False)
+        df[col] = None
+        for spos, eligible in positions.iterrows():
+            starter = df.loc[(df['position'].isin(eligible['eligible'])) & (
+                df[col].isnull()), col].head(1).index
+            df.loc[starter, col] = spos
+        df = df[df[col].notnull()]
+    return df.sort_values(by=['optimistic'], ascending=False)
 
 
 def _style():
@@ -234,78 +233,134 @@ def _style():
     </style>
     """)
 
+@dataclass
+class PlayerDisplay:
+    name: str
+    position: str
+    team: str
+    points: float
+    projection: float
+    optimistic: float
+    pct_played: float
+    bye: bool
+    spos: str
+    current_position: str
+    injury_status: Optional[str] = None
 
-def _is_active(player: dict):
-    return player['pct_played'] < 1.0 and player['pct_played'] > 0.0
+    @classmethod
+    def null_player(cls) -> 'PlayerDisplay':
+        return cls(name='-', position='', team='', points=0.0, projection=0.0,
+                   optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='')
+    
+    @property
+    def status(self) -> str:
+        if self.bye:
+            return "BYE"
+        elif self.is_out:
+            return "OUT"
+        elif self.is_final:
+            return "FINAL"
+        elif self.is_active:
+            return "LIVE"
+        else:
+            return "UPCOMING"
+        
+    @property
+    def is_active(self) -> bool:
+        return self.pct_played < 1.0 and self.pct_played > 0.0
+
+    @property
+    def is_final(self) -> bool:
+        return self.pct_played == 1
+
+    @property
+    def is_out(self) -> bool:
+        return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
+
+    @property
+    def optional_points(self) -> str:
+        if self.is_out or self.bye:
+            return "-"
+        return f"{self.points:.2f}"
+
+    @property
+    def optional_projection(self) -> str:
+        if self.bye or self.is_out:
+            return "-"
+        elif self.is_final:
+            return f"{self.projection:.2f}"
+        else:
+            return f"{self.optimistic:.2f}"
+
+@dataclass
+class TeamDisplay:
+    fantasy_team: str
+    username: str
+    avatar: str
+    matchup_id: str
+    players: list[PlayerDisplay]
+    
+    @classmethod
+    def from_df(cls, df: pd.Series, players: pd.DataFrame, positions: pd.DataFrame) -> 'TeamDisplay':
+        players = players.loc[df['players']]
+        players = _set_starting_positions(players, positions)
+        players = [PlayerDisplay(**p) for p in players.to_dict(orient='records')]
+        return cls(
+            fantasy_team=df['fantasy_team'],
+            username=df['username'],
+            avatar=df['avatar'],
+            matchup_id=df['matchup_id'],
+            players=players
+        )
+    
+    @property
+    def starters(self) -> list[PlayerDisplay]:
+        return [p for p in self.players if not p.spos.startswith('BN')]
+    
+    @property
+    def bench(self) -> list[PlayerDisplay]:
+        return [p for p in self.players if p.spos.startswith('BN')]
+
+    @property
+    def active_players(self) -> list[PlayerDisplay]:
+        return [p for p in self.players if p.projection > 0]
+
+    @property
+    def played(self) -> list[PlayerDisplay]:
+        return [p for p in self.active_players if p.is_final]
+    
+    @property
+    def projection(self) -> float:
+        return f"{sum(p.optimistic for p in self.starters):.2f}"
+
+    @property
+    def points(self) -> float:
+        return f"{sum(p.points for p in self.players if p.current_position != 'BN'):.2f}"
 
 
-def _is_final(player: dict):
-    return player['pct_played'] == 1
-
-
-def _is_out(player):
-    return player['injury_status'] in ['IR', 'Out'] and player['points'] == 0 and player['projection'] == 0
-
-
-def _show_points(player: dict):
-    if _is_out(player) or player['bye']:
-        return "-"
-    return f"{player['points']:.2f}"
-
-
-def _show_projection(player: dict):
-    if player['bye'] or _is_out(player):
-        return "-"
-    elif _is_final(player):
-        return f"{player['projection']:.2f}"
-    else:
-        return f"{player['optimistic']:.2f}"
-
-
-def _player_status(player: dict):
-    if player['bye']:
-        return "BYE"
-    elif _is_out(player):
-        return "OUT"
-    elif _is_final(player):
-        return "FINAL"
-    elif _is_active(player):
-        return "LIVE"
-    else:
-        return "UPCOMING"
-
-
-def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataFrame):
-    null_player = {'name': '-', 'points': 0.0, 'optimistic': 0.0, 'projection': 0.0,
-                   'pct_played': 0.0, 'team': '', 'position': '', 'bye': False, 'injury_status': ''}
+def _player_scores(positions: pd.DataFrame, team1: list[PlayerDisplay], team2: list[PlayerDisplay]):
     rows = []
     for pos, row in positions.iterrows():
-        t1 = team1[team1['spos'] == pos]
-        t2 = team2[team2['spos'] == pos]
-        if t1.empty or t2.empty:
-            p1 = null_player
-            p2 = null_player
-        else:
-            p1 = t1.to_dict(orient='records')[0]
-            p2 = t2.to_dict(orient='records')[0]
+        p1 = [p for p in team1 if p.spos == pos][0] or PlayerDisplay.null_player()
+        p2 = [p for p in team2 if p.spos == pos][0] or PlayerDisplay.null_player()
 
         rows.append(f"""                    
             <tr>
-            <td colspan=2 class="player {'live' if _is_active(p1) else ''}">{p1['name']}</td>
-            <td class="actual">{_show_points(p1)}</td>
+            <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
+            <td class="actual">{p1.optional_points}</td>
             <td rowspan=3 class="position">{row['position']}</td>
-            <td colspan=2 class="player {'live' if _is_active(p2) else ''}">{p2['name']}</td>
-            <td class="actual">{_show_points(p2)}</td>
+            <td colspan=2 class="player {'live' if p2.is_active else ''}">{p2.name}</td>
+            <td class="actual">{p2.optional_points}</td>
             </tr>
             <tr>
-            <td colspan=2 class="player-info">{p1['position']} - {p1['team']}</td>
-            <td class="projection">{_show_projection(p1)}</td>
-            <td colspan=2 class="player-info">{p2['position']} - {p2['team']}</td>
-            <td class="projection">{_show_projection(p2)}</td>
+            <td colspan=2 class="player-info">{p1.position} - {p1.team}</td>
+            <td class="projection">{p1.optional_projection}</td>
+            <td colspan=2 class="player-info">{p2.position} - {p2.team}</td>
+            <td class="projection">{p2.optional_projection}</td>
             </tr>
             <tr>
-            <td colspan=3 class="player-status">{_player_status(p1)}</td>
-            <td colspan=3 class="player-status">{_player_status(p2)}</td>
+            <td colspan=3 class="player-status">{p1.status}</td>
+            <td colspan=3 class="player-status">{p2.status}</td>
             </tr>
         """)
     st.html(f"""
@@ -316,54 +371,42 @@ def _player_scores(positions: pd.DataFrame, team1: pd.DataFrame, team2: pd.DataF
     </table>
     """)
 
-
-def _yet_to_play(team):
-    expected = team[team['projection'] > 0]
-    played = expected[(expected['pct_played'] == 1)]
-    return f"{len(played)} / {len(expected)} played"
-
-
-def _matchup_display(team1, team2, positions, players):
-    t1_players = players.loc[team1['players']]
-    t2_players = players.loc[team2['players']]
-
+def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataFrame):
     st.html(f"""
     <table class="summary">
         <tbody>
             <tr>
-                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1['avatar']}"></td>
-                <td class="actual">{_team_points(t1_players, positions, 'points')}</td>
+                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1.avatar}"></td>
+                <td class="actual">{team1.points}</td>
                 <td rowspan=5 class="position">vs</td>
-                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2['avatar']}"></td>
-                <td class="actual">{_team_points(t2_players, positions, 'points')}</td>
+                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2.avatar}"></td>
+                <td class="actual">{team2.points}</td>
             </tr>
             <tr>
-                <td class="projection">{_team_points(t1_players, positions, 'optimistic')}</td>
-                <td class="projection">{_team_points(t2_players, positions, 'optimistic')}</td>
+                <td class="projection">{team1.projection}</td>
+                <td class="projection">{team2.projection}</td>
             </tr>
             <tr>
-                <td colspan=3>{team1['fantasy_team']}</td>
-                <td colspan=3>{team2['fantasy_team']}</td>
+                <td colspan=3>{team1.fantasy_team}</td>
+                <td colspan=3>{team2.fantasy_team}</td>
             </tr>
             <tr>
-                <td colspan=3 class="username">@{team1['username']}</td>
-                <td colspan=3 class="username">@{team2['username']}</td>
+                <td colspan=3 class="username">@{team1.username}</td>
+                <td colspan=3 class="username">@{team2.username}</td>
             </tr>
             <tr>
-                <td colspan=3 class="yet-to-play">{_yet_to_play(t1_players)}</td>
-                <td colspan=3 class="yet-to-play">{_yet_to_play(t2_players)}</td>
+                <td colspan=3 class="yet-to-play">{len(team1.played)} / {len(team1.active_players)}</td>
+                <td colspan=3 class="yet-to-play">{len(team2.played)} / {len(team2.active_players)}</td>
             </tr>
         </tbody>
     </table>
     """)
-    t1_players = _set_starting_positions(t1_players, positions)
-    t2_players = _set_starting_positions(t2_players, positions)
     with st.expander("Show players"):
         _player_scores(
-            positions[~positions.index.str.startswith('BN')], t1_players, t2_players)
+            positions[~positions.index.str.startswith('BN')], team1.starters, team2.starters)
         with st.expander("Show bench"):
             _player_scores(
-                positions[positions.index.str.startswith('BN')], t1_players, t2_players)
+                    positions[positions.index.str.startswith('BN')], team1.bench, team2.bench)
 
 
 def main():
@@ -393,12 +436,15 @@ def main():
             matchups.drop(user_matchup.index, inplace=True)
             matchups = pd.concat([user_matchup, matchups])
         while not matchups.empty:
-            team1 = matchups.iloc[0]
-            matchups.drop(team1.name, inplace=True)
-            team2 = matchups[matchups['matchup_id']
-                             == team1['matchup_id']].iloc[0]
-            matchups.drop(team2.name, inplace=True)
-            _matchup_display(team1, team2, positions, players)
+            t1_df = matchups.iloc[0]
+            matchups.drop(t1_df.name, inplace=True)
+            team1 = TeamDisplay.from_df(t1_df, players, positions)
+
+            t2_df = matchups[matchups['matchup_id'] == team1.matchup_id].iloc[0]
+            matchups.drop(t2_df.name, inplace=True)
+            team2 = TeamDisplay.from_df(t2_df, players, positions)
+
+            _matchup_display(team1, team2, positions)
 
         st.markdown(f"(League ID: {league_id})")
 
