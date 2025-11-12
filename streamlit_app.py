@@ -34,16 +34,66 @@ class Data:
     _positions: list[str] = None
 
     @staticmethod
-    def from_league(league: League, season: int, week: int):
-        return Data(
-            _game_statuses=_game_statuses(season, week),
-            _matchups=pd.DataFrame(league.get_matchups(week)),
-            _rosters=pd.DataFrame(league.get_rosters()).set_index('roster_id'),
-            _users=pd.DataFrame(league.get_users()).set_index('user_id'),
-            _players=pd.DataFrame.from_dict(
-                Players().get_all_players("nfl"), orient='index'),
-            _projections=Stats().get_week_projections("regular", season, week),
-            _stats=Stats().get_week_stats("regular", season, week),
+    @st.cache_data(ttl=60)
+    def _game_statuses(season: int, week: int) -> pd.DataFrame:
+        url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
+        resp = requests.get(url)
+        data = resp.json()
+        df = pd.json_normalize([e['competitions'][0]
+                            for e in data['events']])
+        df = df.explode('competitors')
+        df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
+        df['team'] = df['team'].replace(TEAM_MAPPINGS)
+        df.set_index('team', inplace=True)
+        df['quarter'] = df['status.period']
+        df['clock'] = df['status.clock']
+        df['game_status'] = df['status.type.shortDetail']
+        return df[['quarter', 'clock', 'game_status']]
+
+    @staticmethod
+    @st.cache_data
+    def _matchups(league_id: int, week: int) -> pd.DataFrame:
+        league_id = League(league_id)
+        return pd.DataFrame(league_id.get_matchups(week))
+    
+    @staticmethod
+    @st.cache_data(ttl=3600)
+    def _rosters(league_id: int) -> pd.DataFrame:
+        league_id = League(league_id)
+        return pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
+    
+    @staticmethod
+    @st.cache_data(ttl=3600)
+    def _users(league_id: int) -> pd.DataFrame:
+        league_id = League(league_id)
+        return pd.DataFrame(league_id.get_users()).set_index('user_id')
+    
+    @staticmethod
+    @st.cache_data(ttl=3600)
+    def _players() -> pd.DataFrame:
+        return pd.DataFrame.from_dict(
+            Players().get_all_players("nfl"), orient='index')
+    
+    @staticmethod
+    @st.cache_data(ttl=3600)
+    def _projections(season: int, week: int) -> pd.DataFrame:
+        return pd.DataFrame(Stats().get_week_projections("regular", season, week))
+
+    @staticmethod
+    @st.cache_data(ttl=60)
+    def _stats(season: int, week: int) -> pd.DataFrame:
+        return pd.DataFrame(Stats().get_week_stats("regular", season, week))
+
+    @classmethod
+    def from_league(cls, league: League, season: int, week: int):
+        return cls(
+            _game_statuses=cls._game_statuses(season, week),
+            _matchups=cls._matchups(league.league_id, week),
+            _rosters=cls._rosters(league.league_id),
+            _users=cls._users(league.league_id),
+            _players=cls._players(),
+            _projections=cls._projections(season, week),
+            _stats=cls._stats(season, week),
             _scoring=league.get_league()['scoring_settings'],
             _positions=league.get_league()['roster_positions']
         )
@@ -102,23 +152,6 @@ def _leagues(season: int, params: dict):
         if not leagues:
             st.warning("No leagues found for this user.")
     return leagues
-
-
-@st.cache_data(ttl=300)
-def _game_statuses(season: int, week: int):
-    url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
-    resp = requests.get(url)
-    data = resp.json()
-    df = pd.json_normalize([e['competitions'][0]
-                           for e in data['events']])
-    df = df.explode('competitors')
-    df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
-    df['team'] = df['team'].replace(TEAM_MAPPINGS)
-    df.set_index('team', inplace=True)
-    df['quarter'] = df['status.period']
-    df['clock'] = df['status.clock']
-    df['game_status'] = df['status.type.shortDetail']
-    return df[['quarter', 'clock', 'game_status']]
 
 
 def _points(stats: dict, scoring: dict):

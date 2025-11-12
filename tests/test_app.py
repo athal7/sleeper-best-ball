@@ -42,9 +42,9 @@ def test_players():
         5: {'first_name': 'Player', 'last_name': 'Five', 'team': 'C', 'position': 'K', 'injury_status': "Out"}
     }, orient='index')
     data._game_statuses = pd.DataFrame.from_dict({
-        'A': {'status.period': 1, 'status.clock': 15*60},
-        'B': {'status.period': 2, 'status.clock': 10*60},
-        'C': {'status.period': 4, 'status.clock': 0}
+        'A': {'quarter': 1, 'clock': 15*60, 'game_status': 'In Progress'},
+        'B': {'quarter': 2, 'clock': 10*60, 'game_status': 'In Progress'},
+        'C': {'quarter': 4, 'clock': 0, 'game_status': 'Final'}
     }, orient='index')
     data._projections = {
         1: {'passing_yards': 100, 'passing_touchdowns': 1},
