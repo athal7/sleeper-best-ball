@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
-from sleeper_wrapper import League, User, get_sport_state, Stats, Players, League
 import requests
-from dataclasses import dataclass, asdict
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List
 
+import sleeper_wrapper as sleeper
+
+TTLS = {
+    'metadata': 3600,
+    'stats': 60,
+}
 TEAM_MAPPINGS = {
     'WSH': 'WAS',
 }
@@ -30,19 +35,20 @@ class Data:
     _players: pd.DataFrame = None
     _projections: pd.DataFrame = None
     _stats: pd.DataFrame = None
-    _scoring: dict = None
-    _positions: list[str] = None
+    _scoring: dict = field(default_factory=dict)
+    _positions: List[str] = field(default_factory=list)
 
     @staticmethod
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=TTLS['stats'])
     def _game_statuses(season: int, week: int) -> pd.DataFrame:
         url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
         resp = requests.get(url)
         data = resp.json()
         df = pd.json_normalize([e['competitions'][0]
-                            for e in data['events']])
+                                for e in data['events']])
         df = df.explode('competitors')
-        df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
+        df['team'] = df['competitors'].apply(
+            lambda x: x['team']['abbreviation'])
         df['team'] = df['team'].replace(TEAM_MAPPINGS)
         df.set_index('team', inplace=True)
         df['quarter'] = df['status.period']
@@ -51,41 +57,41 @@ class Data:
         return df[['quarter', 'clock', 'game_status']]
 
     @staticmethod
-    @st.cache_data
+    @st.cache_data(ttl=TTLS['metadata'])
     def _matchups(league_id: int, week: int) -> pd.DataFrame:
-        league_id = League(league_id)
+        league_id = sleeper.League(league_id)
         return pd.DataFrame(league_id.get_matchups(week))
-    
+
     @staticmethod
-    @st.cache_data(ttl=3600)
+    @st.cache_data(ttl=TTLS['metadata'])
     def _rosters(league_id: int) -> pd.DataFrame:
-        league_id = League(league_id)
+        league_id = sleeper.League(league_id)
         return pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
-    
+
     @staticmethod
-    @st.cache_data(ttl=3600)
+    @st.cache_data(ttl=TTLS['metadata'])
     def _users(league_id: int) -> pd.DataFrame:
-        league_id = League(league_id)
+        league_id = sleeper.League(league_id)
         return pd.DataFrame(league_id.get_users()).set_index('user_id')
-    
+
     @staticmethod
-    @st.cache_data(ttl=3600)
+    @st.cache_data(ttl=TTLS['metadata'])
     def _players() -> pd.DataFrame:
         return pd.DataFrame.from_dict(
-            Players().get_all_players("nfl"), orient='index')
-    
-    @staticmethod
-    @st.cache_data(ttl=3600)
-    def _projections(season: int, week: int) -> pd.DataFrame:
-        return pd.DataFrame(Stats().get_week_projections("regular", season, week))
+            sleeper.Players().get_all_players("nfl"), orient='index')
 
     @staticmethod
-    @st.cache_data(ttl=60)
+    @st.cache_data(ttl=TTLS['metadata'])
+    def _projections(season: int, week: int) -> pd.DataFrame:
+        return pd.DataFrame(sleeper.Stats().get_week_projections("regular", season, week))
+
+    @staticmethod
+    @st.cache_data(ttl=TTLS['stats'])
     def _stats(season: int, week: int) -> pd.DataFrame:
-        return pd.DataFrame(Stats().get_week_stats("regular", season, week))
+        return pd.DataFrame(sleeper.Stats().get_week_stats("regular", season, week))
 
     @classmethod
-    def from_league(cls, league: League, season: int, week: int):
+    def from_league(cls, league: 'sleeper.League', season: int, week: int) -> 'Data':
         return cls(
             _game_statuses=cls._game_statuses(season, week),
             _matchups=cls._matchups(league.league_id, week),
@@ -98,7 +104,7 @@ class Data:
             _positions=league.get_league()['roster_positions']
         )
 
-    def players(self):
+    def players(self) -> pd.DataFrame:
         df = self._players.copy(
         )[['team', 'first_name', 'last_name', 'position', 'injury_status']]
         df = df[df['team'].notna()]
@@ -117,7 +123,7 @@ class Data:
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
         return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
 
-    def starting_positions(self):
+    def starting_positions(self) -> pd.DataFrame:
         df = POSITION_MAPPINGS.copy()
         df = df.join(pd.Series(self._positions).value_counts(), how='inner')
         df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
@@ -127,31 +133,15 @@ class Data:
         df.set_index('spos', inplace=True)
         return df[['position', 'eligible']]
 
-    def matchups(self):
+    def matchups(self) -> pd.DataFrame:
         df = self._matchups
         df = df.join(self._rosters[['owner_id']], on='roster_id', how='left')
         users = self._users[['avatar', 'display_name', 'metadata']].rename(
             columns={'display_name': 'username'})
         df = df.join(users, on='owner_id', how='left')
-        df['fantasy_team'] = df.apply(
+        df['name'] = df.apply(
             lambda row: row['metadata'].get('team_name') or f"Team {row['username']}", axis=1)
-        return df[['fantasy_team', 'username', 'points',  'matchup_id', 'players', 'avatar']]
-
-
-@st.cache_data(ttl=3600)
-def _leagues(season: int, params: dict):
-    username = params.get('username')
-    locked_league_id = params.get('league')
-    leagues = []
-
-    if locked_league_id:
-        leagues = [locked_league_id]
-    elif username:
-        user = User(username)
-        leagues = [l['league_id'] for l in user.get_all_leagues('nfl', season)]
-        if not leagues:
-            st.warning("No leagues found for this user.")
-    return leagues
+        return df[['name', 'username', 'points',  'matchup_id', 'players', 'avatar']]
 
 
 def _points(stats: dict, scoring: dict):
@@ -159,8 +149,9 @@ def _points(stats: dict, scoring: dict):
         total = 0.0
         player_stats = stats.get(row.name, {})
         for stat, pts in scoring.items():
-            if stat in player_stats and pd.notnull(player_stats[stat]):
-                total += player_stats[stat] * pts
+            value = player_stats.get(stat)
+            if value is not None and pd.notnull(value):
+                total += value * pts
         return total
     return _compute
 
@@ -272,7 +263,7 @@ def _style():
 
 
 @dataclass
-class PlayerDisplay:
+class Player:
     name: str
     position: str
     team: str
@@ -287,7 +278,7 @@ class PlayerDisplay:
     game_status: Optional[str] = None
 
     @classmethod
-    def null_player(cls) -> 'PlayerDisplay':
+    def null_player(cls) -> 'Player':
         return cls(name='-', position='', team='', points=0.0, projection=0.0,
                    optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='', game_status='')
 
@@ -329,21 +320,21 @@ class PlayerDisplay:
 
 
 @dataclass
-class TeamDisplay:
-    fantasy_team: str
+class FantasyTeam:
+    name: str
     username: str
     avatar: str
     matchup_id: str
-    players: list[PlayerDisplay]
+    players: list[Player]
 
     @classmethod
-    def from_df(cls, df: pd.Series, players: pd.DataFrame, positions: pd.DataFrame) -> 'TeamDisplay':
+    def from_df(cls, df: pd.Series, players: pd.DataFrame, positions: pd.DataFrame) -> 'FantasyTeam':
         players = players.loc[df['players']]
         players = _set_starting_positions(players, positions)
-        players = [PlayerDisplay(**p)
+        players = [Player(**p)
                    for p in players.to_dict(orient='records')]
         return cls(
-            fantasy_team=df['fantasy_team'],
+            name=df['name'],
             username=df['username'],
             avatar=df['avatar'],
             matchup_id=df['matchup_id'],
@@ -351,19 +342,19 @@ class TeamDisplay:
         )
 
     @property
-    def starters(self) -> list[PlayerDisplay]:
+    def starters(self) -> list[Player]:
         return [p for p in self.players if not p.spos.startswith('BN')]
 
     @property
-    def bench(self) -> list[PlayerDisplay]:
+    def bench(self) -> list[Player]:
         return [p for p in self.players if p.spos.startswith('BN')]
 
     @property
-    def active_players(self) -> list[PlayerDisplay]:
+    def active_players(self) -> list[Player]:
         return [p for p in self.players if p.projection > 0]
 
     @property
-    def played(self) -> list[PlayerDisplay]:
+    def played(self) -> list[Player]:
         return [p for p in self.active_players if p.is_final]
 
     @property
@@ -374,14 +365,14 @@ class TeamDisplay:
     def points(self) -> float:
         return f"{sum(p.points for p in self.players if not p.current_position.startswith('BN')):.2f}"
 
-    def player(self, position: str) -> PlayerDisplay:
+    def player(self, position: str) -> Player:
         for p in self.players:
             if p.spos == position:
                 return p
-        return PlayerDisplay.null_player()
+        return Player.null_player()
 
 
-def _player_scores(positions: pd.DataFrame, team1: TeamDisplay, team2: TeamDisplay):
+def _player_scores(positions: pd.DataFrame, team1: FantasyTeam, team2: FantasyTeam):
     rows = []
     for pos, row in positions.iterrows():
         p1 = team1.player(pos)
@@ -415,7 +406,7 @@ def _player_scores(positions: pd.DataFrame, team1: TeamDisplay, team2: TeamDispl
     """)
 
 
-def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataFrame):
+def _matchup_display(team1: FantasyTeam, team2: FantasyTeam, positions: pd.DataFrame):
     st.html(f"""
     <table class="summary">
         <tbody>
@@ -431,8 +422,8 @@ def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataF
                 <td class="projection">{team2.projection}</td>
             </tr>
             <tr>
-                <td colspan=3>{team1.fantasy_team}</td>
-                <td colspan=3>{team2.fantasy_team}</td>
+                <td colspan=3>{team1.name}</td>
+                <td colspan=3>{team2.name}</td>
             </tr>
             <tr>
                 <td colspan=3 class="username">@{team1.username}</td>
@@ -453,42 +444,70 @@ def _matchup_display(team1: TeamDisplay, team2: TeamDisplay, positions: pd.DataF
                 positions[positions.index.str.startswith('BN')], team1, team2)
 
 
+class Context:
+    season: int
+    week: int
+    username: Optional[str]
+    league_ids: List[int]
+
+    @staticmethod
+    @st.cache_data(ttl=TTLS['metadata'])
+    def _leagues(season: int, params: dict):
+        username = params.get('username')
+        locked_league_id = params.get('league')
+        leagues = []
+
+        if locked_league_id:
+            leagues = [locked_league_id]
+        elif username:
+            user = sleeper.User(username)
+            leagues = [l['league_id']
+                       for l in user.get_all_leagues('nfl', season)]
+            if not leagues:
+                st.warning("No leagues found for this user.")
+        return leagues
+
+    def __init__(self, params: dict, session: dict):
+        current = sleeper.get_sport_state('nfl')
+        self.username = params.get('username')
+        self.season = int(current['league_season'])
+        self.week = session.get('week') or int(current['display_week'])
+        self.league_ids = self._leagues(self.season, params)
+
+
 def main():
     _style()
-    current = get_sport_state('nfl')
-    season = int(current['league_season'])
-    week = st.session_state.get('week') or int(current['display_week'])
-    leagues = _leagues(season, st.query_params.to_dict())
-    username = st.query_params.get('username')
+    context = Context(st.query_params.to_dict(), st.session_state.to_dict())
+    leagues = context.league_ids
     if not leagues:
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
         st.text_input("Enter your Sleeper username:", key='username_input',
-                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=username)
+                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=context.username)
 
     for league_id in leagues:
-        league = League(league_id)
+        league = sleeper.League(league_id)
         st.markdown(f"## {league.get_league_name()}")
         st.number_input("Week", min_value=1, max_value=18,
-                        key='week', value=week)
+                        key='week', value=context.week)
 
-        data = Data.from_league(league, season, week)
+        data = Data.from_league(league, context.season, context.week)
         positions = data.starting_positions()
         players = data.players()
         matchups = data.matchups()
-        if username:
-            user_matchup = matchups[matchups['username'] == username]
+        if context.username:
+            user_matchup = matchups[matchups['username'] == context.username]
             matchups.drop(user_matchup.index, inplace=True)
             matchups = pd.concat([user_matchup, matchups])
         while not matchups.empty:
             t1_df = matchups.iloc[0]
             matchups.drop(t1_df.name, inplace=True)
-            team1 = TeamDisplay.from_df(t1_df, players, positions)
+            team1 = FantasyTeam.from_df(t1_df, players, positions)
 
             t2_df = matchups[matchups['matchup_id']
                              == team1.matchup_id].iloc[0]
             matchups.drop(t2_df.name, inplace=True)
-            team2 = TeamDisplay.from_df(t2_df, players, positions)
+            team2 = FantasyTeam.from_df(t2_df, players, positions)
 
             _matchup_display(team1, team2, positions)
 
