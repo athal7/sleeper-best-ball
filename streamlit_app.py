@@ -133,7 +133,7 @@ class Data:
         df.set_index('spos', inplace=True)
         return df[['position', 'eligible']]
 
-    def matchups(self) -> pd.DataFrame:
+    def matchups(self, context) -> list[tuple['FantasyTeam', 'FantasyTeam']]:
         df = self._matchups
         df = df.join(self._rosters[['owner_id']], on='roster_id', how='left')
         users = self._users[['avatar', 'display_name', 'metadata']].rename(
@@ -141,7 +141,26 @@ class Data:
         df = df.join(users, on='owner_id', how='left')
         df['name'] = df.apply(
             lambda row: row['metadata'].get('team_name') or f"Team {row['username']}", axis=1)
-        return df[['name', 'username', 'points',  'matchup_id', 'players', 'avatar']]
+
+        players = self.players()
+        positions = self.starting_positions()
+        grouped = []
+        # Group by matchup_id and collect teams
+        for _, group in df.groupby('matchup_id'):
+            teams_df = group[['name', 'username', 'points',
+                              'matchup_id', 'players', 'avatar']]
+            if len(teams_df) == 2:
+                team1 = FantasyTeam.from_df(teams_df.iloc[0], players, positions)
+                team2 = FantasyTeam.from_df(teams_df.iloc[1], players, positions)
+                grouped.append((team1, team2))
+        # Sort so that matchups involving the context user come first
+        if context.username:
+            def user_in_matchup(matchup):
+                t1, t2 = matchup
+                return (t1.username != context.username and t2.username != context.username,
+                        t1.name if t1.username == context.username else t2.name)
+            grouped = sorted(grouped, key=user_in_matchup)
+        return grouped
 
 
 def _points(stats: dict, scoring: dict):
@@ -471,7 +490,8 @@ class Context:
         current = sleeper.get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
-        self.week = st.session_state.get('week') or int(current['display_week'])
+        self.week = st.session_state.get(
+            'week') or int(current['display_week'])
         self.league_ids = self._leagues(self.season, st.query_params.to_dict())
 
 
@@ -489,26 +509,9 @@ def main():
         st.markdown(f"## {league.get_league_name()}")
         st.number_input("Week", min_value=1, max_value=18,
                         key='week', value=context.week)
-
         data = Data.from_league(league, context.season, context.week)
-        positions = data.starting_positions()
-        players = data.players()
-        matchups = data.matchups()
-        if context.username:
-            user_matchup = matchups[matchups['username'] == context.username]
-            matchups.drop(user_matchup.index, inplace=True)
-            matchups = pd.concat([user_matchup, matchups])
-        while not matchups.empty:
-            t1_df = matchups.iloc[0]
-            matchups.drop(t1_df.name, inplace=True)
-            team1 = FantasyTeam.from_df(t1_df, players, positions)
-
-            t2_df = matchups[matchups['matchup_id']
-                             == team1.matchup_id].iloc[0]
-            matchups.drop(t2_df.name, inplace=True)
-            team2 = FantasyTeam.from_df(t2_df, players, positions)
-
-            _matchup_display(team1, team2, positions)
+        for team1, team2 in data.matchups(context):
+            _matchup_display(team1, team2, data.starting_positions())
 
         st.markdown(f"(League ID: {league_id})")
 
