@@ -55,8 +55,7 @@ class Data:
         df['name'] = df.apply(
             lambda row: f"{row['first_name'][0]}. {row['last_name']}", axis=1)
         df = df.join(self._game_statuses, on='team', how='left')
-        df['pct_played'] = (df['status.period'] * 15 -
-                            df['status.clock'] / 60) / 60
+        df['pct_played'] = (df['quarter'] * 15 - df['clock'] / 60) / 60
         df['pct_played'] = df['pct_played'].clip(0, 1)
         df['bye'] = False
         df.loc[df['pct_played'].isna(), 'bye'] = True
@@ -66,7 +65,7 @@ class Data:
             _points(self._projections, self._scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
-        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status']]
+        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
 
     def starting_positions(self):
         df = POSITION_MAPPINGS.copy()
@@ -89,7 +88,8 @@ class Data:
         return df[['fantasy_team', 'username', 'points',  'matchup_id', 'players', 'avatar']]
 
 
-def _leagues(season, params):
+@st.cache_data(ttl=3600)
+def _leagues(season: int, params: dict):
     username = params.get('username')
     locked_league_id = params.get('league')
     leagues = []
@@ -104,6 +104,7 @@ def _leagues(season, params):
     return leagues
 
 
+@st.cache_data(ttl=300)
 def _game_statuses(season: int, week: int):
     url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
     resp = requests.get(url)
@@ -114,7 +115,10 @@ def _game_statuses(season: int, week: int):
     df['team'] = df['competitors'].apply(lambda x: x['team']['abbreviation'])
     df['team'] = df['team'].replace(TEAM_MAPPINGS)
     df.set_index('team', inplace=True)
-    return df[['status.period', 'status.clock']]
+    df['quarter'] = df['status.period']
+    df['clock'] = df['status.clock']
+    df['game_status'] = df['status.type.shortDetail']
+    return df[['quarter', 'clock', 'game_status']]
 
 
 def _points(stats: dict, scoring: dict):
@@ -247,11 +251,12 @@ class PlayerDisplay:
     spos: str
     current_position: str
     injury_status: Optional[str] = None
+    game_status: Optional[str] = None
 
     @classmethod
     def null_player(cls) -> 'PlayerDisplay':
         return cls(name='-', position='', team='', points=0.0, projection=0.0,
-                   optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='')
+                   optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='', game_status='')
 
     @property
     def status(self) -> str:
@@ -259,12 +264,8 @@ class PlayerDisplay:
             return "BYE"
         elif self.is_out:
             return "OUT"
-        elif self.is_final:
-            return "FINAL"
-        elif self.is_active:
-            return "LIVE"
         else:
-            return "UPCOMING"
+            return self.game_status
 
     @property
     def is_active(self) -> bool:
@@ -339,8 +340,7 @@ class TeamDisplay:
     @property
     def points(self) -> float:
         return f"{sum(p.points for p in self.players if not p.current_position.startswith('BN')):.2f}"
-    
-    
+
     def player(self, position: str) -> PlayerDisplay:
         for p in self.players:
             if p.spos == position:
@@ -425,7 +425,7 @@ def main():
     current = get_sport_state('nfl')
     season = int(current['league_season'])
     week = st.session_state.get('week') or int(current['display_week'])
-    leagues = _leagues(season, st.query_params)
+    leagues = _leagues(season, st.query_params.to_dict())
     username = st.query_params.get('username')
     if not leagues:
         st.title("Sleeper Best Ball 🏈")
