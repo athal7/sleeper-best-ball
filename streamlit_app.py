@@ -467,25 +467,24 @@ class Context:
                 st.warning("No leagues found for this user.")
         return leagues
 
-    def __init__(self, params: dict, session: dict):
+    def __init__(self):
         current = sleeper.get_sport_state('nfl')
-        self.username = params.get('username')
+        self.username = st.query_params.get('username', [None])
         self.season = int(current['league_season'])
-        self.week = session.get('week') or int(current['display_week'])
-        self.league_ids = self._leagues(self.season, params)
+        self.week = st.session_state.get('week') or int(current['display_week'])
+        self.league_ids = self._leagues(self.season, st.query_params.to_dict())
 
 
 def main():
     _style()
-    context = Context(st.query_params.to_dict(), st.session_state.to_dict())
-    leagues = context.league_ids
-    if not leagues:
+    context = Context()
+    if not context.league_ids:
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
         st.text_input("Enter your Sleeper username:", key='username_input',
                       on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=context.username)
 
-    for league_id in leagues:
+    for league_id in context.league_ids:
         league = sleeper.League(league_id)
         st.markdown(f"## {league.get_league_name()}")
         st.number_input("Week", min_value=1, max_value=18,
