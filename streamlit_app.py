@@ -469,7 +469,7 @@ class Context:
 
     def __init__(self):
         current = sleeper.get_sport_state('nfl')
-        self.username = st.query_params.get('username', [None])
+        self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
         self.week = st.session_state.get('week') or int(current['display_week'])
         self.league_ids = self._leagues(self.season, st.query_params.to_dict())
