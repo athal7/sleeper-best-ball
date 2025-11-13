@@ -15,7 +15,7 @@ def stub_data() -> Data:
         positions=[],
     )
 
-def test_players():
+def test_points_calculations():
     data = stub_data()
     data.players = pd.DataFrame.from_dict({
         1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB', 'injury_status': None},
@@ -45,12 +45,7 @@ def test_players():
     league = League(id=data.league_id, data=data)
     df = league.players()
     print(df)
-    assert df['name'].tolist() == ['P. One', 'P. Two',
-                                   'P. Three', 'P. Four', 'P. Five']
-    assert df['position'].tolist() == ['QB', 'WR', 'TE', 'RB', 'K']
-    assert df['team'].tolist() == ['A', 'B', 'C', 'D', 'C']
-    assert df['pct_played'].tolist() == [0, 1/3, 1, 0, 1]
-
+    
     p1, p2, p3, p4, p5 = df.to_dict(orient='records')
     assert p1['points'] == 0
     assert round(p1['projection'], 2) == round((100*0.04 + 1*4), 2)

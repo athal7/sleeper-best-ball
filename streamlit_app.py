@@ -134,8 +134,6 @@ class League:
         df = self.data.players.copy(
         )[['team', 'first_name', 'last_name', 'position', 'injury_status']]
         df = df[df['team'].notna()]
-        df['name'] = df.apply(
-            lambda row: f"{row['first_name'][0]}. {row['last_name']}", axis=1)
         df = df.join(self.data.game_statuses, on='team', how='left')
         df['pct_played'] = (df['quarter'] * 15 - df['clock'] / 60) / 60
         df['pct_played'] = df['pct_played'].clip(0, 1)
@@ -147,7 +145,7 @@ class League:
             _points(self.data.projections, self.data.scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
-        return df[['name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
+        return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
 
     def starting_positions(self) -> pd.DataFrame:
         df = POSITION_MAPPINGS.copy()
@@ -311,7 +309,8 @@ def _style():
 
 @dataclass
 class Player:
-    name: str
+    first_name: str
+    last_name: str
     position: str
     team: str
     points: float
@@ -326,9 +325,13 @@ class Player:
 
     @classmethod
     def null_player(cls) -> 'Player':
-        return cls(name='-', position='', team='', points=0.0, projection=0.0,
+        return cls(first_name='-', last_name='-', position='', team='', points=0.0, projection=0.0,
                    optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='', game_status='')
 
+    @property
+    def name(self) -> str:
+        return f"{self.first_name[0]}. {self.last_name}"
+    
     @property
     def status(self) -> str:
         if self.bye:
