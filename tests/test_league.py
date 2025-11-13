@@ -7,7 +7,6 @@ def stub_data() -> Data:
         game_statuses=pd.DataFrame(),
         matchups=pd.DataFrame(),
         rosters=pd.DataFrame(),
-        users=pd.DataFrame(),
         players=pd.DataFrame(),
         projections=pd.DataFrame(),
         stats=pd.DataFrame(),

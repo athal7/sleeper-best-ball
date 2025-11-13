@@ -33,7 +33,6 @@ class Data:
     game_statuses: pd.DataFrame = None
     matchups: pd.DataFrame = None
     rosters: pd.DataFrame = None
-    users: pd.DataFrame = None
     players: pd.DataFrame = None
     projections: pd.DataFrame = None
     stats: pd.DataFrame = None
@@ -48,8 +47,6 @@ class Data:
             self.matchups = self.get_matchups(self.league_id, self.context.week)
         if self.rosters is None:
             self.rosters = self.get_rosters(self.league_id)
-        if self.users is None:
-            self.users = self.get_users(self.league_id)
         if self.players is None:
             self.players = self.get_players()
         if self.projections is None:
@@ -92,13 +89,13 @@ class Data:
     @st.cache_data(ttl=TTLS['metadata'])
     def get_rosters(league_id: int) -> pd.DataFrame:
         league_id = sleeper.League(league_id)
-        return pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
-
-    @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
-    def get_users(league_id: int) -> pd.DataFrame:
-        league_id = sleeper.League(league_id)
-        return pd.DataFrame(league_id.get_users()).set_index('user_id')
+        df = pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
+        users = pd.DataFrame(league_id.get_users()).set_index('user_id')
+        df = df.merge(users, left_on='owner_id', right_index=True, how='left')
+        df.rename(columns={'display_name': 'username'}, inplace=True)
+        df['name'] = df.apply(
+            lambda row: row['metadata_y'].get('team_name') or f"Team {row['username']}", axis=1)
+        return df[['avatar', 'username', 'name', 'players']]
 
     @staticmethod
     @st.cache_data(ttl=TTLS['metadata'])
@@ -159,12 +156,7 @@ class League:
 
     def matchups(self, context) -> list[tuple['FantasyTeam', 'FantasyTeam']]:
         df = self.data.matchups
-        df = df.join(self.data.rosters[['owner_id']], on='roster_id', how='left')
-        users = self.data.users[['avatar', 'display_name', 'metadata']].rename(
-            columns={'display_name': 'username'})
-        df = df.join(users, on='owner_id', how='left')
-        df['name'] = df.apply(
-            lambda row: row['metadata'].get('team_name') or f"Team {row['username']}", axis=1)
+        df = df.join(self.data.rosters[['avatar', 'username', 'name']], on='roster_id', how='left')
 
         players = self.players()
         positions = self.starting_positions()
