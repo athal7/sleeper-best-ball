@@ -34,8 +34,22 @@ def test_by_league_query_param():
     assert league_id in at.markdown[1].value
 
 
+def stub_data() -> Data:
+    return Data(
+        league_id=123,
+        game_statuses=pd.DataFrame(),
+        matchups=pd.DataFrame(),
+        rosters=pd.DataFrame(),
+        users=pd.DataFrame(),
+        players=pd.DataFrame(),
+        projections=pd.DataFrame(),
+        stats=pd.DataFrame(),
+        scoring={},
+        positions=[],
+    )
+
 def test_players():
-    data = Data.stub(123)
+    data = stub_data()
     data.players = pd.DataFrame.from_dict({
         1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB', 'injury_status': None},
         2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR', 'injury_status': None},
@@ -94,7 +108,7 @@ def test_players():
 
 
 def test_starting_positions():
-    data = Data.stub(123)
+    data = stub_data()
     data.positions = ['QB', 'RB', 'RB', 'WR', 'WR',
                       'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
     league = League(id=data.league_id, data=data)

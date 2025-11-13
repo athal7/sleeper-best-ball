@@ -40,21 +40,6 @@ class Data:
     scoring: dict = None
     positions: list[str] = None
 
-    @classmethod
-    def stub(cls, league_id: int) -> 'Data':
-        return cls(
-            league_id=league_id,
-            game_statuses=pd.DataFrame(),
-            matchups=pd.DataFrame(),
-            rosters=pd.DataFrame(),
-            users=pd.DataFrame(),
-            players=pd.DataFrame(),
-            projections=pd.DataFrame(),
-            stats=pd.DataFrame(),
-            scoring={},
-            positions=[],
-        )
-
     def __post_init__(self) -> 'Data':
         if self.game_statuses is None:
             self.game_statuses = self.get_game_statuses(
