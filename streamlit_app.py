@@ -168,14 +168,12 @@ class Player:
     def is_out(self) -> bool:
         return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
-    @property
-    def get_points(self) -> str:
+    def render_points(self) -> str:
         if self.is_out or self.bye:
             return "-"
         return f"{self.points:.2f}"
 
-    @property
-    def get_projection(self) -> str:
+    def render_projection(self) -> str:
         if self.bye or self.is_out:
             return "-"
         elif self.is_final:
@@ -310,16 +308,16 @@ class Matchup:
             rows.append(f"""                    
                 <tr>
                 <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
-                <td class="actual">{p1.get_points}</td>
+                <td class="actual">{p1.render_points()}</td>
                 <td rowspan=3 class="position">{row['position']}</td>
                 <td colspan=2 class="player {'live' if p2.is_active else ''}">{p2.name}</td>
-                <td class="actual">{p2.get_points}</td>
+                <td class="actual">{p2.render_points()}</td>
                 </tr>
                 <tr>
                 <td colspan=2 class="player-info">{p1.position} - {p1.team}</td>
-                <td class="projection">{p1.get_projection}</td>
+                <td class="projection">{p1.render_projection()}</td>
                 <td colspan=2 class="player-info">{p2.position} - {p2.team}</td>
-                <td class="projection">{p2.get_projection}</td>
+                <td class="projection">{p2.render_projection()}</td>
                 </tr>
                 <tr>
                 <td colspan=3 class="player-status">{p1.status}</td>
