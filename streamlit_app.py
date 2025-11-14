@@ -6,14 +6,8 @@ from typing import Optional, List
 
 import sleeper_wrapper as sleeper
 
-TTLS = {
-    'metadata': 3600,
-    'stats': 60,
-}
-TEAM_MAPPINGS = {
-    'WSH': 'WAS',
-}
-
+METADATA_TTL = 60 * 60  # 1 hour
+STATS_TTL = 60 * 5      # 5 minutes
 
 @dataclass
 class Data:
@@ -27,6 +21,10 @@ class Data:
     stats: pd.DataFrame = None
     scoring: dict = None
     positions: list[str] = None
+
+    TEAM_MAPPINGS = {
+        'WSH': 'WAS',
+    }
 
     def __post_init__(self) -> 'Data':
         if self.game_statuses is None:
@@ -52,7 +50,7 @@ class Data:
             self.positions = league.get_league()['roster_positions']
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['stats'])
+    @st.cache_data(ttl=STATS_TTL)
     def get_game_statuses(season: int, week: int) -> pd.DataFrame:
         url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
         resp = requests.get(url)
@@ -62,7 +60,7 @@ class Data:
         df = df.explode('competitors')
         df['team'] = df['competitors'].apply(
             lambda x: x['team']['abbreviation'])
-        df['team'] = df['team'].replace(TEAM_MAPPINGS)
+        df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
         df.set_index('team', inplace=True)
         df['quarter'] = df['status.period']
         df['clock'] = df['status.clock']
@@ -70,13 +68,13 @@ class Data:
         return df[['quarter', 'clock', 'game_status']]
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
+    @st.cache_data(ttl=METADATA_TTL)
     def get_matchups(league_id: int, week: int) -> pd.DataFrame:
         league_id = sleeper.League(league_id)
         return pd.DataFrame(league_id.get_matchups(week))
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
+    @st.cache_data(ttl=METADATA_TTL)
     def get_rosters(league_id: int) -> pd.DataFrame:
         league_id = sleeper.League(league_id)
         df = pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
@@ -88,32 +86,20 @@ class Data:
         return df[['avatar', 'username', 'name', 'players']]
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
+    @st.cache_data(ttl=METADATA_TTL)
     def get_players() -> pd.DataFrame:
         return pd.DataFrame.from_dict(
             sleeper.Players().get_all_players("nfl"), orient='index')
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
+    @st.cache_data(ttl=METADATA_TTL)
     def get_projections(season: int, week: int) -> pd.DataFrame:
         return pd.DataFrame(sleeper.Stats().get_week_projections("regular", season, week))
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['stats'])
+    @st.cache_data(ttl=STATS_TTL)
     def get_stats(season: int, week: int) -> pd.DataFrame:
         return pd.DataFrame(sleeper.Stats().get_week_stats("regular", season, week))
-
-
-def _points(stats: dict, scoring: dict):
-    def _compute(row):
-        total = 0.0
-        player_stats = stats.get(row.name, {})
-        for stat, pts in scoring.items():
-            value = player_stats.get(stat)
-            if value is not None and pd.notnull(value):
-                total += value * pts
-        return total
-    return _compute
 
 class Positions(pd.DataFrame):
     MAPPINGS = [
@@ -360,6 +346,19 @@ class League:
     data: Data
     _league: sleeper.League = field(init=False)
 
+    @staticmethod
+    def _calc_points_from_stats(stats: dict, scoring: dict):
+        def _compute(row):
+            total = 0.0
+            player_stats = stats.get(row.name, {})
+            for stat, pts in scoring.items():
+                value = player_stats.get(stat)
+                if value is not None and pd.notnull(value):
+                    total += value * pts
+            return total
+        return _compute
+
+
     def __post_init__(self):
         self._league = sleeper.League(self.id)
 
@@ -378,9 +377,9 @@ class League:
         df.loc[df['pct_played'].isna(), 'bye'] = True
         df.loc[df['pct_played'].isna(), 'pct_played'] = 0
         df['points'] = df.apply(
-            _points(self.data.stats, self.data.scoring), axis=1)
+            self._calc_points_from_stats(self.data.stats, self.data.scoring), axis=1)
         df['projection'] = df.apply(
-            _points(self.data.projections, self.data.scoring), axis=1)
+            self._calc_points_from_stats(self.data.projections, self.data.scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
         return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
@@ -418,7 +417,7 @@ class Context:
     leagues: List[League]
 
     @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
+    @st.cache_data(ttl=METADATA_TTL)
     def _leagues(season: int, params: dict):
         username = params.get('username')
         locked_league_id = params.get('league')
