@@ -9,45 +9,54 @@ import sleeper_wrapper as sleeper
 METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
 
+
 @dataclass
 class Data:
-    league_id: int
-    context: 'Context' = None
+    league_id: InitVar[int]
+    context: InitVar['Context']
     game_statuses: pd.DataFrame = None
     matchups: pd.DataFrame = None
     rosters: pd.DataFrame = None
     players: pd.DataFrame = None
     projections: pd.DataFrame = None
     stats: pd.DataFrame = None
-    scoring: dict = None
-    positions: list[str] = None
+    league: sleeper.League = None
 
     TEAM_MAPPINGS = {
         'WSH': 'WAS',
     }
 
-    def __post_init__(self) -> 'Data':
+    def __post_init__(self, league_id: int, context: 'Context') -> 'Data':
         if self.game_statuses is None:
             self.game_statuses = self.get_game_statuses(
-                self.context.season, self.context.week)
+                context.season, context.week)
         if self.matchups is None:
             self.matchups = self.get_matchups(
-                self.league_id, self.context.week)
+                league_id, context.week)
         if self.rosters is None:
-            self.rosters = self.get_rosters(self.league_id)
+            self.rosters = self.get_rosters(league_id)
         if self.players is None:
             self.players = self.get_players()
         if self.projections is None:
             self.projections = self.get_projections(
-                self.context.season, self.context.week)
+                context.season, context.week)
         if self.stats is None:
-            self.stats = self.get_stats(self.context.season, self.context.week)
-        if self.scoring is None:
-            league = sleeper.League(self.league_id)
-            self.scoring = league.get_league()['scoring_settings']
-        if self.positions is None:
-            league = sleeper.League(self.league_id)
-            self.positions = league.get_league()['roster_positions']
+            self.stats = self.get_stats(context.season, context.week)
+        if self.league is None:
+            self.league = self.get_league(league_id)
+
+    @staticmethod
+    @st.cache_data(ttl=METADATA_TTL)
+    def get_league(league_id: int) -> sleeper.League:
+        return sleeper.League(league_id)
+
+    @property
+    def scoring(self) -> dict:
+        return self.league.get_league()['scoring_settings']
+
+    @property
+    def positions(self) -> list[str]:
+        return self.league.get_league()['roster_positions']
 
     @staticmethod
     @st.cache_data(ttl=STATS_TTL)
@@ -101,6 +110,7 @@ class Data:
     def get_stats(season: int, week: int) -> pd.DataFrame:
         return pd.DataFrame(sleeper.Stats().get_week_stats("regular", season, week))
 
+
 class Positions(pd.DataFrame):
     MAPPINGS = [
         ['QB', 'QB', ['QB']],
@@ -113,9 +123,10 @@ class Positions(pd.DataFrame):
         ['DEF', 'DEF', ['DEF']],
         ['BN', 'BN', ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']],
     ]
-    
+
     def __init__(self, data: Data):
-        df = pd.DataFrame(self.MAPPINGS).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
+        df = pd.DataFrame(self.MAPPINGS).rename(
+            columns={1: 'position', 2: 'eligible'}).set_index(0)
         df = df.join(
             pd.Series(data.positions).value_counts(), how='inner')
         df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
@@ -132,6 +143,7 @@ class Positions(pd.DataFrame):
     @property
     def bench(self) -> pd.DataFrame:
         return self[self.index.str.startswith('BN')]
+
 
 @dataclass
 class Player:
@@ -300,9 +312,9 @@ class Matchup:
         </table>
         """)
         with st.expander("Show players"):
-            self.render_players( self.positions.starting)
+            self.render_players(self.positions.starting)
             with st.expander("Show bench"):
-                self.render_players( self.positions.bench)
+                self.render_players(self.positions.bench)
 
     def render_players(self, positions: pd.DataFrame):
         rows = []
@@ -342,9 +354,7 @@ class Matchup:
 
 @dataclass
 class League:
-    id: int
     data: Data
-    _league: sleeper.League = field(init=False)
 
     @staticmethod
     def _calc_points_from_stats(stats: dict, scoring: dict):
@@ -358,13 +368,13 @@ class League:
             return total
         return _compute
 
-
-    def __post_init__(self):
-        self._league = sleeper.League(self.id)
+    @property
+    def id(self) -> int:
+        return self.data.league.league_id
 
     @property
     def name(self) -> str:
-        return self._league.get_league_name()
+        return self.data.league.get_league_name()
 
     def players(self) -> pd.DataFrame:
         df = self.data.players.copy(
@@ -442,7 +452,7 @@ class Context:
         self.leagues = []
         for league_id in self._leagues(self.season, st.query_params.to_dict()):
             data = Data(league_id=league_id, context=self)
-            self.leagues.append(League(id=league_id, data=data))
+            self.leagues.append(League(data=data))
 
 
 def _style():

@@ -4,8 +4,9 @@ from streamlit_app import Positions
 
 def test_eligible_positions():
     data = tests.mock.data()
-    data.positions = ['QB', 'RB', 'RB', 'WR', 'WR',
-                      'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
+    data.league.get_league.return_value = {
+        'roster_positions': ['QB', 'RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
+    }
     positions = Positions(data)
 
     assert positions.loc['QB']['eligible'] == ['QB']

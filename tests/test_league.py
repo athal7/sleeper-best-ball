@@ -2,6 +2,7 @@ import pandas as pd
 import tests.mock
 from streamlit_app import League
 
+
 def test_points_calculations():
     data = tests.mock.data()
     data.players = pd.DataFrame.from_dict({
@@ -23,16 +24,19 @@ def test_points_calculations():
     data.stats = pd.DataFrame({
         2: {'receiving_yards': 10, 'receiving_touchdowns': 0},
         3: {'receiving_yards': 20, 'receiving_touchdowns': 0}})
-    data.scoring = {
-        'passing_yards': 0.04,
-        'passing_touchdowns': 4,
-        'receiving_yards': 0.1,
-        'receiving_touchdowns': 6}
-    data.positions = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
-    league = League(id=data.league_id, data=data)
+    data.league.get_league.return_value = {
+        'scoring_settings': {
+            'passing_yards': 0.04,
+            'passing_touchdowns': 4,
+            'receiving_yards': 0.1,
+            'receiving_touchdowns': 6
+        }, 
+        'roster_positions': ['QB', 'RB', 'WR', 'TE', 'FLEX', 'DEF']
+    }
+    league = League(data=data)
     df = league.players()
     print(df)
-    
+
     p1, p2, p3, p4, p5 = df.to_dict(orient='records')
     assert p1['points'] == 0
     assert round(p1['projection'], 2) == round((100*0.04 + 1*4), 2)
