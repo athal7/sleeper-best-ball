@@ -13,17 +13,6 @@ TTLS = {
 TEAM_MAPPINGS = {
     'WSH': 'WAS',
 }
-POSITION_MAPPINGS = pd.DataFrame([
-    ['QB', 'QB', ['QB']],
-    ['RB', 'RB', ['RB']],
-    ['WR', 'WR', ['WR']],
-    ['TE', 'TE', ['TE']],
-    ['FLEX', 'FX', ['RB', 'WR', 'TE']],
-    ['SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']],
-    ['K', 'K', ['K']],
-    ['DEF', 'DEF', ['DEF']],
-    ['BN', 'BN', ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']],
-]).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
 
 
 @dataclass
@@ -126,6 +115,37 @@ def _points(stats: dict, scoring: dict):
         return total
     return _compute
 
+class Positions(pd.DataFrame):
+    MAPPINGS = [
+        ['QB', 'QB', ['QB']],
+        ['RB', 'RB', ['RB']],
+        ['WR', 'WR', ['WR']],
+        ['TE', 'TE', ['TE']],
+        ['FLEX', 'FX', ['RB', 'WR', 'TE']],
+        ['SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']],
+        ['K', 'K', ['K']],
+        ['DEF', 'DEF', ['DEF']],
+        ['BN', 'BN', ['QB', 'RB', 'WR', 'TE', 'K', 'DEF']],
+    ]
+    
+    def __init__(self, data: Data):
+        df = pd.DataFrame(self.MAPPINGS).rename(columns={1: 'position', 2: 'eligible'}).set_index(0)
+        df = df.join(
+            pd.Series(data.positions).value_counts(), how='inner')
+        df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
+        counts = df.groupby('position').cumcount()
+        df['spos'] = df.apply(
+            lambda row: f"{row['position']}{counts[row.name]+1}" if counts[row.name] > 0 else row['position'], axis=1)
+        df.set_index('spos', inplace=True)
+        super().__init__(df[['position', 'eligible']])
+
+    @property
+    def starting(self) -> pd.DataFrame:
+        return self[~self.index.str.startswith('BN')]
+
+    @property
+    def bench(self) -> pd.DataFrame:
+        return self[self.index.str.startswith('BN')]
 
 @dataclass
 class Player:
@@ -238,14 +258,14 @@ class Roster(pd.DataFrame):
 class FantasyTeam:
     players: InitVar[pd.Series]
     all_players: InitVar[pd.DataFrame]
-    positions: InitVar[pd.DataFrame]
+    positions: InitVar[Positions]
     name: str
     username: str
     avatar: str
     matchup_id: str
     roster: Roster = field(init=False)
 
-    def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: pd.DataFrame):
+    def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: Positions):
         self.roster = Roster(all_players.loc[players], positions)
 
     @property
@@ -261,7 +281,7 @@ class FantasyTeam:
 class Matchup:
     team1: FantasyTeam
     team2: FantasyTeam
-    positions: pd.DataFrame
+    positions: Positions
 
     def render(self):
         st.html(f"""
@@ -294,11 +314,9 @@ class Matchup:
         </table>
         """)
         with st.expander("Show players"):
-            self.render_players(
-                self.positions[~self.positions.index.str.startswith('BN')])
+            self.render_players( self.positions.starting)
             with st.expander("Show bench"):
-                self.render_players(
-                    self.positions[self.positions.index.str.startswith('BN')])
+                self.render_players( self.positions.bench)
 
     def render_players(self, positions: pd.DataFrame):
         rows = []
@@ -367,24 +385,13 @@ class League:
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
         return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
 
-    def starting_positions(self) -> pd.DataFrame:
-        df = POSITION_MAPPINGS.copy()
-        df = df.join(
-            pd.Series(self.data.positions).value_counts(), how='inner')
-        df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
-        counts = df.groupby('position').cumcount()
-        df['spos'] = df.apply(
-            lambda row: f"{row['position']}{counts[row.name]+1}" if counts[row.name] > 0 else row['position'], axis=1)
-        df.set_index('spos', inplace=True)
-        return df[['position', 'eligible']]
-
     def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups
         df = df.join(
             self.data.rosters[['avatar', 'username', 'name']], on='roster_id', how='left')
 
         all_players = self.players()
-        positions = self.starting_positions()
+        positions = Positions(self.data)
         grouped = []
         # Group by matchup_id and collect teams
         for _, group in df.groupby('matchup_id'):

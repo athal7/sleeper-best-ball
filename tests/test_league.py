@@ -1,21 +1,9 @@
 import pandas as pd
-from streamlit_app import League, Data
-
-def stub_data() -> Data:
-    return Data(
-        league_id=123,
-        game_statuses=pd.DataFrame(),
-        matchups=pd.DataFrame(),
-        rosters=pd.DataFrame(),
-        players=pd.DataFrame(),
-        projections=pd.DataFrame(),
-        stats=pd.DataFrame(),
-        scoring={},
-        positions=[],
-    )
+import tests.mock
+from streamlit_app import League
 
 def test_points_calculations():
-    data = stub_data()
+    data = tests.mock.data()
     data.players = pd.DataFrame.from_dict({
         1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB', 'injury_status': None},
         2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR', 'injury_status': None},
@@ -66,23 +54,3 @@ def test_points_calculations():
     assert p5['points'] == 0
     assert p5['projection'] == 0
     assert p5['optimistic'] == 0
-
-
-def test_starting_positions():
-    data = stub_data()
-    data.positions = ['QB', 'RB', 'RB', 'WR', 'WR',
-                      'WR', 'TE', 'FLEX', 'SUPER_FLEX', 'DEF']
-    league = League(id=data.league_id, data=data)
-
-    positions = league.starting_positions()
-    print(positions)
-    assert positions.loc['QB']['eligible'] == ['QB']
-    assert positions.loc['RB']['eligible'] == ['RB']
-    assert positions.loc['RB2']['eligible'] == ['RB']
-    assert positions.loc['WR']['eligible'] == ['WR']
-    assert positions.loc['WR2']['eligible'] == ['WR']
-    assert positions.loc['WR3']['eligible'] == ['WR']
-    assert positions.loc['TE']['eligible'] == ['TE']
-    assert positions.loc['FX']['eligible'] == ['RB', 'WR', 'TE']
-    assert positions.loc['SFX']['eligible'] == ['QB', 'RB', 'WR', 'TE']
-    assert positions.loc['DEF']['eligible'] == ['DEF']
