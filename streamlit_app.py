@@ -115,14 +115,237 @@ class Data:
         return pd.DataFrame(sleeper.Stats().get_week_stats("regular", season, week))
 
 
+def _points(stats: dict, scoring: dict):
+    def _compute(row):
+        total = 0.0
+        player_stats = stats.get(row.name, {})
+        for stat, pts in scoring.items():
+            value = player_stats.get(stat)
+            if value is not None and pd.notnull(value):
+                total += value * pts
+        return total
+    return _compute
+
+
+@dataclass
+class Player:
+    first_name: str = field(default_factory=str)
+    last_name: str = field(default_factory=str)
+    position: str = field(default_factory=str)
+    team: str = field(default_factory=str)
+    points: float = field(default_factory=float)
+    projection: float = field(default_factory=float)
+    optimistic: float = field(default_factory=float)
+    pct_played: float = field(default_factory=float)
+    bye: bool = field(default_factory=bool)
+    spos: str = field(default_factory=str)
+    current_position: str = field(default_factory=str)
+    injury_status: str = field(default_factory=str)
+    game_status: str = field(default_factory=str)
+
+    @property
+    def name(self) -> str:
+        return f"{self.first_name[0]}. {self.last_name}"
+
+    @property
+    def status(self) -> str:
+        if self.bye:
+            return "BYE"
+        elif self.is_out:
+            return "OUT"
+        else:
+            return self.game_status
+
+    @property
+    def is_active(self) -> bool:
+        return self.pct_played < 1.0 and self.pct_played > 0.0
+
+    @property
+    def is_final(self) -> bool:
+        return self.pct_played == 1
+
+    @property
+    def is_out(self) -> bool:
+        return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
+
+    @property
+    def get_points(self) -> str:
+        if self.is_out or self.bye:
+            return "-"
+        return f"{self.points:.2f}"
+
+    @property
+    def get_projection(self) -> str:
+        if self.bye or self.is_out:
+            return "-"
+        elif self.is_final:
+            return f"{self.projection:.2f}"
+        else:
+            return f"{self.optimistic:.2f}"
+
+
+class Roster(pd.DataFrame):
+    def __init__(self, players: pd.DataFrame, positions: pd.DataFrame):
+        df = players.copy()
+        cols = {
+            'optimistic': 'spos',
+            'points': 'current_position',
+        }
+        for by, col in cols.items():
+            df = df.sort_values(by=[by], ascending=False)
+            df[col] = None
+            for spos, eligible in positions.iterrows():
+                starter = df.loc[(df['position'].isin(eligible['eligible'])) & (
+                    df[col].isnull()), col].head(1).index
+                df.loc[starter, col] = spos
+            df = df[df[col].notnull()]
+        df = df.sort_values(by=['optimistic'], ascending=False)
+        super().__init__(df)
+
+    def to_records(self) -> list[Player]:
+        return [Player(**row._asdict()) for row in self.itertuples()]
+
+    @property
+    def current_starters(self) -> 'Roster':
+        return self[~self['current_position'].str.startswith('BN')]
+
+    @property
+    def current_bench(self) -> 'Roster':
+        return self[self['current_position'].str.startswith('BN')]
+
+    @property
+    def projected_starters(self) -> 'Roster':
+        return self[~self['spos'].str.startswith('BN')]
+
+    @property
+    def projected_bench(self) -> 'Roster':
+        return self[self['spos'].str.startswith('BN')]
+
+    @property
+    def active(self) -> 'Roster':
+        return self[self['projection'] > 0]
+
+    @property
+    def played(self) -> 'Roster':
+        return self.active.loc[self['pct_played'] == 1]
+
+    def at_position(self, position: str) -> Player:
+        df = self.loc[(self['spos'] == position)]
+        if not df.empty:
+            return Player(**df.iloc[0].to_dict())
+        return Player()
+
+
+@dataclass
+class FantasyTeam:
+    players: InitVar[pd.Series]
+    all_players: InitVar[pd.DataFrame]
+    positions: InitVar[pd.DataFrame]
+    name: str
+    username: str
+    avatar: str
+    matchup_id: str
+    roster: Roster = field(init=False)
+
+    def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: pd.DataFrame):
+        self.roster = Roster(all_players.loc[players], positions)
+
+    @property
+    def projection(self) -> float:
+        return f"{self.roster.projected_starters.optimistic.sum():.2f}"
+
+    @property
+    def points(self) -> float:
+        return f"{self.roster.current_starters.points.sum():.2f}"
+
+
+@dataclass
+class Matchup:
+    team1: FantasyTeam
+    team2: FantasyTeam
+    positions: pd.DataFrame
+
+    def render(self):
+        st.html(f"""
+        <table class="summary">
+            <tbody>
+                <tr>
+                    <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{self.team1.avatar}"></td>
+                    <td class="actual">{self.team1.points}</td>
+                    <td rowspan=5 class="position">vs</td>
+                    <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{self.team2.avatar}"></td>
+                    <td class="actual">{self.team2.points}</td>
+                </tr>
+                <tr>
+                    <td class="projection">{self.team1.projection}</td>
+                    <td class="projection">{self.team2.projection}</td>
+                </tr>
+                <tr>
+                    <td colspan=3>{self.team1.name}</td>
+                    <td colspan=3>{self.team2.name}</td>
+                </tr>
+                <tr>
+                    <td colspan=3 class="username">@{self.team1.username}</td>
+                    <td colspan=3 class="username">@{self.team2.username}</td>
+                </tr>
+                <tr>
+                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]}</td>
+                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]}</td>
+                </tr>
+            </tbody>
+        </table>
+        """)
+        with st.expander("Show players"):
+            self.render_players(
+                self.positions[~self.positions.index.str.startswith('BN')])
+            with st.expander("Show bench"):
+                self.render_players(
+                    self.positions[self.positions.index.str.startswith('BN')])
+
+    def render_players(self, positions: pd.DataFrame):
+        rows = []
+        for pos, row in positions.iterrows():
+            p1 = self.team1.roster.at_position(pos)
+            p2 = self.team2.roster.at_position(pos)
+            rows.append(f"""                    
+                <tr>
+                <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
+                <td class="actual">{p1.get_points}</td>
+                <td rowspan=3 class="position">{row['position']}</td>
+                <td colspan=2 class="player {'live' if p2.is_active else ''}">{p2.name}</td>
+                <td class="actual">{p2.get_points}</td>
+                </tr>
+                <tr>
+                <td colspan=2 class="player-info">{p1.position} - {p1.team}</td>
+                <td class="projection">{p1.get_projection}</td>
+                <td colspan=2 class="player-info">{p2.position} - {p2.team}</td>
+                <td class="projection">{p2.get_projection}</td>
+                </tr>
+                <tr>
+                <td colspan=3 class="player-status">{p1.status}</td>
+                <td colspan=3 class="player-status">{p2.status}</td>
+                </tr>
+            """)
+        st.html(f"""
+        <table class="players">
+            <tbody>
+                {'<tr><td colspan="7"><hr></td></tr>'.join(rows)}
+            </tbody>
+        </table>
+        """)
+
+    def contains_user(self, username: str) -> bool:
+        return self.team1.username == username or self.team2.username == username
+
+
 @dataclass
 class League:
-    _league: sleeper.League
-    data: Data = None
+    id: int
+    data: Data
+    _league: sleeper.League = field(init=False)
 
-    def __init__(self, id: int, context: 'Context' = None, **kwargs):
-        self._league = sleeper.League(id)
-        self.data = kwargs.get('data') or Data(league_id=id, context=context)
+    def __post_init__(self):
+        self._league = sleeper.League(self.id)
 
     @property
     def name(self) -> str:
@@ -157,7 +380,7 @@ class League:
         df.set_index('spos', inplace=True)
         return df[['position', 'eligible']]
 
-    def matchups(self, context) -> list[tuple['FantasyTeam', 'FantasyTeam']]:
+    def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups
         df = df.join(
             self.data.rosters[['avatar', 'username', 'name']], on='roster_id', how='left')
@@ -174,27 +397,48 @@ class League:
                     **teams_df.iloc[0].to_dict(), all_players=all_players, positions=positions)
                 team2 = FantasyTeam(
                     **teams_df.iloc[1].to_dict(), all_players=all_players, positions=positions)
-                grouped.append((team1, team2))
+                grouped.append(
+                    Matchup(team1=team1, team2=team2, positions=positions))
         # Sort so that matchups involving the context user come first
         if context.username:
-            def user_in_matchup(matchup):
-                t1, t2 = matchup
-                return (t1.username != context.username and t2.username != context.username,
-                        t1.name if t1.username == context.username else t2.name)
-            grouped = sorted(grouped, key=user_in_matchup)
+            grouped = sorted(
+                grouped, key=lambda m: not m.contains_user(context.username))
         return grouped
 
 
-def _points(stats: dict, scoring: dict):
-    def _compute(row):
-        total = 0.0
-        player_stats = stats.get(row.name, {})
-        for stat, pts in scoring.items():
-            value = player_stats.get(stat)
-            if value is not None and pd.notnull(value):
-                total += value * pts
-        return total
-    return _compute
+class Context:
+    season: int
+    week: int
+    username: Optional[str]
+    leagues: List[League]
+
+    @staticmethod
+    @st.cache_data(ttl=TTLS['metadata'])
+    def _leagues(season: int, params: dict):
+        username = params.get('username')
+        locked_league_id = params.get('league')
+        leagues = []
+
+        if locked_league_id:
+            leagues = [locked_league_id]
+        elif username:
+            user = sleeper.User(username)
+            leagues = [l['league_id']
+                       for l in user.get_all_leagues('nfl', season)]
+            if not leagues:
+                st.warning("No leagues found for this user.")
+        return leagues
+
+    def __init__(self):
+        current = sleeper.get_sport_state('nfl')
+        self.username = st.query_params.get('username')
+        self.season = int(current['league_season'])
+        self.week = st.session_state.get(
+            'week') or int(current['display_week'])
+        self.leagues = []
+        for league_id in self._leagues(self.season, st.query_params.to_dict()):
+            data = Data(league_id=league_id, context=self)
+            self.leagues.append(League(id=league_id, data=data))
 
 
 def _style():
@@ -286,259 +530,22 @@ def _style():
     """)
 
 
-@dataclass
-class Player:
-    first_name: str = field(default_factory=str)
-    last_name: str = field(default_factory=str)
-    position: str = field(default_factory=str)
-    team: str = field(default_factory=str)
-    points: float = field(default_factory=float)
-    projection: float = field(default_factory=float)
-    optimistic: float = field(default_factory=float)
-    pct_played: float = field(default_factory=float)
-    bye: bool = field(default_factory=bool)
-    spos: str = field(default_factory=str)
-    current_position: str = field(default_factory=str)
-    injury_status: str = field(default_factory=str)
-    game_status: str = field(default_factory=str)
-
-    @property
-    def name(self) -> str:
-        return f"{self.first_name[0]}. {self.last_name}"
-
-    @property
-    def status(self) -> str:
-        if self.bye:
-            return "BYE"
-        elif self.is_out:
-            return "OUT"
-        else:
-            return self.game_status
-
-    @property
-    def is_active(self) -> bool:
-        return self.pct_played < 1.0 and self.pct_played > 0.0
-
-    @property
-    def is_final(self) -> bool:
-        return self.pct_played == 1
-
-    @property
-    def is_out(self) -> bool:
-        return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
-
-    @property
-    def get_points(self) -> str:
-        if self.is_out or self.bye:
-            return "-"
-        return f"{self.points:.2f}"
-
-    @property
-    def get_projection(self) -> str:
-        if self.bye or self.is_out:
-            return "-"
-        elif self.is_final:
-            return f"{self.projection:.2f}"
-        else:
-            return f"{self.optimistic:.2f}"
-
-
-class Roster(pd.DataFrame):
-    def __init__(self, players: pd.DataFrame, positions: pd.DataFrame):
-        df = players.copy()
-        cols = {
-            'optimistic': 'spos',
-            'points': 'current_position',
-        }
-        for by, col in cols.items():
-            df = df.sort_values(by=[by], ascending=False)
-            df[col] = None
-            for spos, eligible in positions.iterrows():
-                starter = df.loc[(df['position'].isin(eligible['eligible'])) & (
-                    df[col].isnull()), col].head(1).index
-                df.loc[starter, col] = spos
-            df = df[df[col].notnull()]
-        df = df.sort_values(by=['optimistic'], ascending=False)
-        super().__init__(df)
-
-    def to_records(self) -> list[Player]:
-        return [Player(**row._asdict()) for row in self.itertuples()]
-
-    @property
-    def current_starters(self) -> 'Roster':
-        return self[~self['current_position'].str.startswith('BN')]
-    
-    @property
-    def current_bench(self) -> 'Roster':
-        return self[self['current_position'].str.startswith('BN')]
-
-    @property
-    def projected_starters(self) -> 'Roster':
-        return self[~self['spos'].str.startswith('BN')]
-
-
-    @property
-    def projected_bench(self) -> 'Roster':
-        return self[self['spos'].str.startswith('BN')]
-    
-    @property
-    def active(self) -> 'Roster':
-        return self[self['projection'] > 0]
-
-    @property
-    def played(self) -> 'Roster':
-        return self.active.loc[self['pct_played'] == 1]
-
-    def at_position(self, position: str) -> Player:
-        df = self.loc[(self['spos'] == position)]
-        if not df.empty:
-            return Player(**df.iloc[0].to_dict())
-        return Player()
-
-
-@dataclass
-class FantasyTeam:
-    players: InitVar[pd.Series]
-    all_players: InitVar[pd.DataFrame]
-    positions: InitVar[pd.DataFrame]
-    name: str
-    username: str
-    avatar: str
-    matchup_id: str
-    roster: Roster = field(init=False)
-
-    def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: pd.DataFrame):
-        self.roster = Roster(all_players.loc[players], positions)
-
-    @property
-    def projection(self) -> float:
-        return f"{self.roster.projected_starters.optimistic.sum():.2f}"
-
-    @property
-    def points(self) -> float:
-        return f"{self.roster.current_starters.points.sum():.2f}"
-
-
-def _player_scores(positions: pd.DataFrame, team1: Roster, team2: Roster):
-    rows = []
-    for pos, row in positions.iterrows():
-        p1 = team1.at_position(pos)
-        p2 = team2.at_position(pos)
-        rows.append(f"""                    
-            <tr>
-            <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
-            <td class="actual">{p1.get_points}</td>
-            <td rowspan=3 class="position">{row['position']}</td>
-            <td colspan=2 class="player {'live' if p2.is_active else ''}">{p2.name}</td>
-            <td class="actual">{p2.get_points}</td>
-            </tr>
-            <tr>
-            <td colspan=2 class="player-info">{p1.position} - {p1.team}</td>
-            <td class="projection">{p1.get_projection}</td>
-            <td colspan=2 class="player-info">{p2.position} - {p2.team}</td>
-            <td class="projection">{p2.get_projection}</td>
-            </tr>
-            <tr>
-            <td colspan=3 class="player-status">{p1.status}</td>
-            <td colspan=3 class="player-status">{p2.status}</td>
-            </tr>
-        """)
-    st.html(f"""
-    <table class="players">
-        <tbody>
-            {'<tr><td colspan="7"><hr></td></tr>'.join(rows)}
-        </tbody>
-    </table>
-    """)
-
-
-def _matchup_display(team1: FantasyTeam, team2: FantasyTeam, positions: pd.DataFrame):
-    st.html(f"""
-    <table class="summary">
-        <tbody>
-            <tr>
-                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team1.avatar}"></td>
-                <td class="actual">{team1.points}</td>
-                <td rowspan=5 class="position">vs</td>
-                <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{team2.avatar}"></td>
-                <td class="actual">{team2.points}</td>
-            </tr>
-            <tr>
-                <td class="projection">{team1.projection}</td>
-                <td class="projection">{team2.projection}</td>
-            </tr>
-            <tr>
-                <td colspan=3>{team1.name}</td>
-                <td colspan=3>{team2.name}</td>
-            </tr>
-            <tr>
-                <td colspan=3 class="username">@{team1.username}</td>
-                <td colspan=3 class="username">@{team2.username}</td>
-            </tr>
-            <tr>
-                <td colspan=3 class="yet-to-play">{team1.roster.played.shape[0]} / {team1.roster.active.shape[0]}</td>
-                <td colspan=3 class="yet-to-play">{team2.roster.played.shape[0]} / {team2.roster.active.shape[0]}</td>
-            </tr>
-        </tbody>
-    </table>
-    """)
-    with st.expander("Show players"):
-        _player_scores(
-            positions[~positions.index.str.startswith('BN')], team1.roster, team2.roster)
-        with st.expander("Show bench"):
-            _player_scores(
-                positions[positions.index.str.startswith('BN')], team1.roster, team2.roster)
-
-
-class Context:
-    season: int
-    week: int
-    username: Optional[str]
-    league_ids: List[int]
-
-    @staticmethod
-    @st.cache_data(ttl=TTLS['metadata'])
-    def _leagues(season: int, params: dict):
-        username = params.get('username')
-        locked_league_id = params.get('league')
-        leagues = []
-
-        if locked_league_id:
-            leagues = [locked_league_id]
-        elif username:
-            user = sleeper.User(username)
-            leagues = [l['league_id']
-                       for l in user.get_all_leagues('nfl', season)]
-            if not leagues:
-                st.warning("No leagues found for this user.")
-        return leagues
-
-    def __init__(self):
-        current = sleeper.get_sport_state('nfl')
-        self.username = st.query_params.get('username')
-        self.season = int(current['league_season'])
-        self.week = st.session_state.get(
-            'week') or int(current['display_week'])
-        self.league_ids = self._leagues(self.season, st.query_params.to_dict())
-
-
 def main():
     _style()
     context = Context()
-    if not context.league_ids:
+    if not context.leagues:
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
         st.text_input("Enter your Sleeper username:", key='username_input',
                       on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=context.username)
 
-    for league_id in context.league_ids:
-        league = League(id=league_id, context=context)
+    for league in context.leagues:
         st.markdown(f"## {league.name}")
         st.number_input("Week", min_value=1, max_value=18,
                         key='week', value=context.week)
-        for team1, team2 in league.matchups(context):
-            _matchup_display(team1, team2, league.starting_positions())
-        st.markdown(f"(League ID: {league_id})")
+        for matchup in league.matchups(context):
+            matchup.render()
+        st.markdown(f"(League ID: {league.id})")
 
 
 if __name__ == "__main__":
