@@ -288,24 +288,19 @@ def _style():
 
 @dataclass
 class Player:
-    first_name: str
-    last_name: str
-    position: str
-    team: str
-    points: float
-    projection: float
-    optimistic: float
-    pct_played: float
-    bye: bool
-    spos: str
-    current_position: str
-    injury_status: Optional[str] = None
-    game_status: Optional[str] = None
-
-    @classmethod
-    def null_player(cls) -> 'Player':
-        return cls(first_name='-', last_name='-', position='', team='', points=0.0, projection=0.0,
-                   optimistic=0.0, pct_played=0.0, bye=False, injury_status='', spos='', current_position='', game_status='')
+    first_name: str = field(default_factory=str)
+    last_name: str = field(default_factory=str)
+    position: str = field(default_factory=str)
+    team: str = field(default_factory=str)
+    points: float = field(default_factory=float)
+    projection: float = field(default_factory=float)
+    optimistic: float = field(default_factory=float)
+    pct_played: float = field(default_factory=float)
+    bye: bool = field(default_factory=bool)
+    spos: str = field(default_factory=str)
+    current_position: str = field(default_factory=str)
+    injury_status: str = field(default_factory=str)
+    game_status: str = field(default_factory=str)
 
     @property
     def name(self) -> str:
@@ -366,9 +361,8 @@ class Roster(pd.DataFrame):
         df = df.sort_values(by=['optimistic'], ascending=False)
         super().__init__(df)
 
-    def to_records(self):
-        for _, row in self.iterrows():
-            yield Player(**row.to_dict())
+    def to_records(self) -> list[Player]:
+        return [Player(**row._asdict()) for row in self.itertuples()]
 
     @property
     def current_starters(self) -> 'Roster':
@@ -395,6 +389,12 @@ class Roster(pd.DataFrame):
     def played(self) -> 'Roster':
         return self.active.loc[self['pct_played'] == 1]
 
+    def at_position(self, position: str) -> Player:
+        df = self.loc[(self['spos'] == position)]
+        if not df.empty:
+            return Player(**df.iloc[0].to_dict())
+        return Player()
+
 
 @dataclass
 class FantasyTeam:
@@ -417,19 +417,13 @@ class FantasyTeam:
     @property
     def points(self) -> float:
         return f"{self.roster.current_starters.points.sum():.2f}"
-    
-    def player(self, position: str) -> Player:
-        for p in self.roster.to_records():
-            if p.spos == position:
-                return p
-        return Player.null_player()
 
 
-def _player_scores(positions: pd.DataFrame, team1: FantasyTeam, team2: FantasyTeam):
+def _player_scores(positions: pd.DataFrame, team1: Roster, team2: Roster):
     rows = []
     for pos, row in positions.iterrows():
-        p1 = team1.player(pos)
-        p2 = team2.player(pos)
+        p1 = team1.at_position(pos)
+        p2 = team2.at_position(pos)
         rows.append(f"""                    
             <tr>
             <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
@@ -490,10 +484,10 @@ def _matchup_display(team1: FantasyTeam, team2: FantasyTeam, positions: pd.DataF
     """)
     with st.expander("Show players"):
         _player_scores(
-            positions[~positions.index.str.startswith('BN')], team1, team2)
+            positions[~positions.index.str.startswith('BN')], team1.roster, team2.roster)
         with st.expander("Show bench"):
             _player_scores(
-                positions[positions.index.str.startswith('BN')], team1, team2)
+                positions[positions.index.str.startswith('BN')], team1.roster, team2.roster)
 
 
 class Context:
