@@ -273,6 +273,14 @@ class Roster(pd.DataFrame):
         return self[self['projection'] > 0]
 
     @property
+    def in_progress(self) -> 'Roster':
+        return self.active.loc[(self['pct_played'] > 0) & (self['pct_played'] < 1)]
+    
+    @property
+    def left_to_play(self) -> 'Roster':
+        return self.active.loc[self['pct_played'] == 0]
+
+    @property
     def played(self) -> 'Roster':
         return self.active.loc[self['pct_played'] == 1]
 
@@ -281,6 +289,9 @@ class Roster(pd.DataFrame):
         if not df.empty:
             return Player(**df.iloc[0].to_dict())
         return Player()
+    
+    def render_played_counts(self) -> str:
+        return f"{self.played.shape[0]} done / {self.in_progress.shape[0]} live / {self.left_to_play.shape[0]} left"
 
 
 @dataclass
@@ -336,8 +347,8 @@ class Matchup:
                     <td colspan=3 class="username">@{self.team2.username}</td>
                 </tr>
                 <tr>
-                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]}</td>
-                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]}</td>
+                    <td colspan=3 class="yet-to-play">{self.team1.roster.render_played_counts()}</td>
+                    <td colspan=3 class="yet-to-play">{self.team2.roster.render_played_counts()}</td>
                 </tr>
             </tbody>
         </table>
