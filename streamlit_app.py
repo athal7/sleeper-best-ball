@@ -187,12 +187,12 @@ class Player:
         return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
     def render_points(self) -> str:
-        if self.is_out or self.bye:
+        if self.points == 0:
             return "-"
         return f"{self.points:.2f}"
 
     def render_projection(self) -> str:
-        if self.bye or self.is_out:
+        if self.projection == 0:
             return "-"
         elif self.is_final:
             return f"{self.projection:.2f}"
