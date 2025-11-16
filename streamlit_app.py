@@ -305,8 +305,8 @@ class Matchup:
                     <td colspan=3 class="username">@{self.team2.username}</td>
                 </tr>
                 <tr>
-                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]}</td>
-                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]}</td>
+                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]} played</td>
+                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]} played</td>
                 </tr>
             </tbody>
         </table>
