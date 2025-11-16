@@ -528,6 +528,9 @@ def _style():
     td.player {
         font-size: 0.9em;
         line-height: 0.9em;
+        text-overflow: ellipsis;
+        overflow: hidden;
+        white-space: nowrap;
     }
     td.player-info {
         font-size: 0.7em;
