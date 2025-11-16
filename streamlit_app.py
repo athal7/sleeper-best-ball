@@ -70,11 +70,23 @@ class Data:
         df['team'] = df['competitors'].apply(
             lambda x: x['team']['abbreviation'])
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
+        df['score'] = df['competitors'].apply(lambda x: x['score']['displayValue'])
+        # Assign opponent for each row by matching on game id and team not equal
+        def find_opponent(row):
+            same_game = df[df['id'] == row['id']]
+            opp = same_game[same_game['team'] != row['team']]
+            if not opp.empty:
+                return opp.iloc[0].to_dict()
+            return None
+        df['opponent'] = df.apply(find_opponent, axis=1)
+        df['opponent_score'] = df['opponent'].apply(lambda x: x['score'] if x is not None else None)
+        df['opponent'] = df['opponent'].apply(lambda x: x['team'] if x is not None else None)
         df.set_index('team', inplace=True)
         df['quarter'] = df['status.period']
         df['clock'] = df['status.clock']
         df['game_status'] = df['status.type.shortDetail']
-        return df[['quarter', 'clock', 'game_status']]
+        df['home'] = df['competitors'].apply(lambda x: x['homeAway'] == 'home')
+        return df[['quarter', 'clock', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
@@ -160,6 +172,10 @@ class Player:
     current_position: str = field(default_factory=str)
     injury_status: str = field(default_factory=str)
     game_status: str = field(default_factory=str)
+    home: bool = field(default_factory=bool)
+    opponent: str = field(default_factory=str)
+    score: Optional[int] = field(default=None)
+    opponent_score: Optional[int] = field(default=None)
 
     @property
     def name(self) -> str:
@@ -172,7 +188,12 @@ class Player:
         elif self.is_out:
             return "OUT"
         else:
-            return self.game_status
+            status = [self.game_status]
+            if self.pct_played > 0:
+                status.append(f"{self.score}-{self.opponent_score}")
+            status.append("vs" if self.home else "@")
+            status.append(self.opponent)
+            return ' '.join(status)
 
     @property
     def is_active(self) -> bool:
@@ -392,7 +413,7 @@ class League:
             self._calc_points_from_stats(self.data.projections, self.data.scoring), axis=1)
         df['optimistic'] = df.apply(
             lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
-        return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status']]
+        return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups

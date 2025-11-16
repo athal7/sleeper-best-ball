@@ -1,21 +1,22 @@
 import pandas as pd
 import tests.mock
-from streamlit_app import League
+from streamlit_app import League, Player
+from dataclasses import asdict
 
 
 def test_points_calculations():
     data = tests.mock.data()
     data.players = pd.DataFrame.from_dict({
-        1: {'first_name': 'Player', 'last_name': 'One', 'team': 'A', 'position': 'QB', 'injury_status': None},
-        2: {'first_name': 'Player', 'last_name': 'Two', 'team': 'B', 'position': 'WR', 'injury_status': None},
-        3: {'first_name': 'Player', 'last_name': 'Three', 'team': 'C', 'position': 'TE', 'injury_status': None},
-        4: {'first_name': 'Player', 'last_name': 'Four', 'team': 'D', 'position': 'RB', 'injury_status': None},
-        5: {'first_name': 'Player', 'last_name': 'Five', 'team': 'C', 'position': 'K', 'injury_status': "Out"}
+        1: tests.mock.player(team='A', position='QB'),
+        2: tests.mock.player(team='B', position='WR'),
+        3: tests.mock.player(team='C', position='TE'),
+        4: tests.mock.player(team='D', position='RB'),
+        5: tests.mock.player(team='C', position='K', injury_status="Out")
     }, orient='index')
     data.game_statuses = pd.DataFrame.from_dict({
-        'A': {'quarter': 1, 'clock': 15*60, 'game_status': 'In Progress'},
-        'B': {'quarter': 2, 'clock': 10*60, 'game_status': 'In Progress'},
-        'C': {'quarter': 4, 'clock': 0, 'game_status': 'Final'}
+        'A': tests.mock.game_status(quarter=1, clock=15*60),
+        'B': tests.mock.game_status(quarter=2, clock=10*60),
+        'C': tests.mock.game_status(quarter=4, clock=0)
     }, orient='index')
     data.projections = pd.DataFrame({
         1: {'passing_yards': 100, 'passing_touchdowns': 1},
