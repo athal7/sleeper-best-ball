@@ -218,9 +218,16 @@ class Player:
         else:
             return f"{self.optimistic:.2f}"
 
+    INJURY_STATUS_MAP = {
+        'Probable': 'P',
+        'Questionable': 'Q',
+        'Doubtful': 'D',
+        'Out': 'O',
+        'IR': 'IR',
+    }
     def render_injury_status(self) -> str:
         if self.injury_status:
-            return f"({self.injury_status})"
+            return f"({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
         return ""
 
 
