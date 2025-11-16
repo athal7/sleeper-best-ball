@@ -181,12 +181,10 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    @property
-    def status(self) -> str:
+    
+    def render_status(self) -> str:
         if self.bye:
             return "BYE"
-        elif self.is_out:
-            return "OUT"
         else:
             status = [self.game_status]
             if self.pct_played > 0:
@@ -208,17 +206,22 @@ class Player:
         return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
     def render_points(self) -> str:
-        if self.points == 0:
+        if self.is_out or self.bye:
             return "-"
         return f"{self.points:.2f}"
 
     def render_projection(self) -> str:
-        if self.projection == 0:
+        if self.bye or self.is_out:
             return "-"
         elif self.is_final:
             return f"{self.projection:.2f}"
         else:
             return f"{self.optimistic:.2f}"
+
+    def render_injury_status(self) -> str:
+        if self.injury_status:
+            return f"({self.injury_status})"
+        return ""
 
 
 class Roster(pd.DataFrame):
@@ -326,8 +329,8 @@ class Matchup:
                     <td colspan=3 class="username">@{self.team2.username}</td>
                 </tr>
                 <tr>
-                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]} played</td>
-                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]} played</td>
+                    <td colspan=3 class="yet-to-play">{self.team1.roster.played.shape[0]} / {self.team1.roster.active.shape[0]}</td>
+                    <td colspan=3 class="yet-to-play">{self.team2.roster.played.shape[0]} / {self.team2.roster.active.shape[0]}</td>
                 </tr>
             </tbody>
         </table>
@@ -351,14 +354,14 @@ class Matchup:
                 <td class="actual">{p2.render_points()}</td>
                 </tr>
                 <tr>
-                <td colspan=2 class="player-info">{p1.position} - {p1.team}</td>
+                <td colspan=2 class="player-info">{p1.position} - {p1.team} {p1.render_injury_status()}</td>
                 <td class="projection">{p1.render_projection()}</td>
-                <td colspan=2 class="player-info">{p2.position} - {p2.team}</td>
+                <td colspan=2 class="player-info">{p2.position} - {p2.team} {p2.render_injury_status()}</td>
                 <td class="projection">{p2.render_projection()}</td>
                 </tr>
                 <tr>
-                <td colspan=3 class="player-status">{p1.status}</td>
-                <td colspan=3 class="player-status">{p2.status}</td>
+                <td colspan=3 class="player-status">{p1.render_status()}</td>
+                <td colspan=3 class="player-status">{p2.render_status()}</td>
                 </tr>
             """)
         st.html(f"""
