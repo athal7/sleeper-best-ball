@@ -94,8 +94,8 @@ class Data:
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
     def get_rosters(league_id: int) -> pd.DataFrame:
-        league_id = sleeper.League(league_id)
-        df = pd.json_normalize(league_id.get_rosters()).set_index('roster_id')
+        league = sleeper.League(league_id)
+        df = pd.json_normalize(league.get_rosters()).set_index('roster_id')
         df['record'] = df['settings.wins'].astype(
             str) + '-' + df['settings.losses'].astype(str)
         df.sort_values(by=['settings.wins', 'settings.fpts'],
@@ -103,7 +103,7 @@ class Data:
         df['rank'] = range(1, len(df) + 1)
         df = df[['owner_id', 'players', 'record', 'rank']]
 
-        users = pd.json_normalize(league_id.get_users()).set_index('user_id')
+        users = pd.json_normalize(league.get_users()).set_index('user_id')
         users = users[['display_name', 'avatar', 'metadata.team_name']]
 
         df = df.merge(users, left_on='owner_id', right_index=True, how='left')
