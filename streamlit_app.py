@@ -70,8 +70,9 @@ class Data:
         df['team'] = df['competitors'].apply(
             lambda x: x['team']['abbreviation'])
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
-        df['score'] = df['competitors'].apply(lambda x: x['score']['displayValue'])
-        # Assign opponent for each row by matching on game id and team not equal
+        df['score'] = df['competitors'].apply(
+            lambda x: x['score']['displayValue'])
+
         def find_opponent(row):
             same_game = df[df['id'] == row['id']]
             opp = same_game[same_game['team'] != row['team']]
@@ -79,8 +80,10 @@ class Data:
                 return opp.iloc[0].to_dict()
             return None
         df['opponent'] = df.apply(find_opponent, axis=1)
-        df['opponent_score'] = df['opponent'].apply(lambda x: x['score'] if x is not None else None)
-        df['opponent'] = df['opponent'].apply(lambda x: x['team'] if x is not None else None)
+        df['opponent_score'] = df['opponent'].apply(
+            lambda x: x['score'] if x is not None else None)
+        df['opponent'] = df['opponent'].apply(
+            lambda x: x['team'] if x is not None else None)
         df.set_index('team', inplace=True)
         df['quarter'] = df['status.period']
         df['clock'] = df['status.clock']
@@ -98,13 +101,21 @@ class Data:
     @st.cache_data(ttl=METADATA_TTL)
     def get_rosters(league_id: int) -> pd.DataFrame:
         league_id = sleeper.League(league_id)
-        df = pd.DataFrame(league_id.get_rosters()).set_index('roster_id')
-        users = pd.DataFrame(league_id.get_users()).set_index('user_id')
+        df = pd.json_normalize(league_id.get_rosters()).set_index('roster_id')
+        df['record'] = df['settings.wins'].astype(
+            str) + '-' + df['settings.losses'].astype(str)
+        df.sort_values(by=['settings.wins', 'settings.fpts'],
+                       ascending=[False, False], inplace=True)
+        df['rank'] = range(1, len(df) + 1)
+        df = df[['owner_id', 'players', 'record', 'rank']]
+
+        users = pd.json_normalize(league_id.get_users()).set_index('user_id')
+        users = users[['display_name', 'avatar', 'metadata.team_name']]
+
         df = df.merge(users, left_on='owner_id', right_index=True, how='left')
         df.rename(columns={'display_name': 'username'}, inplace=True)
-        df['name'] = df.apply(
-            lambda row: row['metadata_y'].get('team_name') or f"Team {row['username']}", axis=1)
-        return df[['avatar', 'username', 'name', 'players']]
+        df['name'] = df['metadata.team_name'].replace('', pd.NA).fillna("Team " + df['username'])
+        return df[['avatar', 'username', 'name', 'record', 'rank']]
 
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
@@ -181,7 +192,6 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    
     def render_status(self) -> str:
         if self.bye:
             return "BYE"
@@ -225,6 +235,7 @@ class Player:
         'Out': 'O',
         'IR': 'IR',
     }
+
     def render_injury_status(self) -> str:
         if self.injury_status:
             return f"({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
@@ -275,7 +286,7 @@ class Roster(pd.DataFrame):
     @property
     def in_progress(self) -> 'Roster':
         return self.active.loc[(self['pct_played'] > 0) & (self['pct_played'] < 1)]
-    
+
     @property
     def left_to_play(self) -> 'Roster':
         return self.active.loc[self['pct_played'] == 0]
@@ -289,7 +300,7 @@ class Roster(pd.DataFrame):
         if not df.empty:
             return Player(**df.iloc[0].to_dict())
         return Player()
-    
+
     def render_played_counts(self) -> str:
         return f"{self.played.shape[0]} done / {self.in_progress.shape[0]} live / {self.left_to_play.shape[0]} left"
 
@@ -303,6 +314,8 @@ class FantasyTeam:
     username: str
     avatar: str
     matchup_id: str
+    record: str
+    rank: int
     roster: Roster = field(init=False)
 
     def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: Positions):
@@ -315,6 +328,9 @@ class FantasyTeam:
     @property
     def points(self) -> float:
         return f"{self.roster.current_starters.points.sum():.2f}"
+
+    def render_username(self) -> str:
+        return f"@{self.username} · #{self.rank} ({self.record})"
 
 
 @dataclass
@@ -343,8 +359,8 @@ class Matchup:
                     <td colspan=3>{self.team2.name}</td>
                 </tr>
                 <tr>
-                    <td colspan=3 class="username">@{self.team1.username}</td>
-                    <td colspan=3 class="username">@{self.team2.username}</td>
+                    <td colspan=3 class="username">{self.team1.render_username()}</td>
+                    <td colspan=3 class="username">{self.team2.render_username()}</td>
                 </tr>
                 <tr>
                     <td colspan=3 class="yet-to-play">{self.team1.roster.render_played_counts()}</td>
@@ -438,8 +454,7 @@ class League:
 
     def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups
-        df = df.join(
-            self.data.rosters[['avatar', 'username', 'name']], on='roster_id', how='left')
+        df = df.join(self.data.rosters, on='roster_id', how='left')
 
         all_players = self.players()
         positions = Positions(self.data)
@@ -447,7 +462,7 @@ class League:
         # Group by matchup_id and collect teams
         for _, group in df.groupby('matchup_id'):
             teams_df = group[['name', 'username',
-                              'matchup_id', 'players', 'avatar']]
+                              'matchup_id', 'players', 'avatar', 'record', 'rank']]
             if len(teams_df) == 2:
                 team1 = FantasyTeam(
                     **teams_df.iloc[0].to_dict(), all_players=all_players, positions=positions)
