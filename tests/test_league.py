@@ -1,7 +1,6 @@
 import pandas as pd
 import tests.mock
-from streamlit_app import League, Player
-from dataclasses import asdict
+from streamlit_app import League
 
 
 def test_points_calculations():
