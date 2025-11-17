@@ -442,8 +442,7 @@ class League:
             self._calc_points_from_stats(self.data.stats, self.data.scoring), axis=1)
         df['projection'] = df.apply(
             self._calc_points_from_stats(self.data.projections, self.data.scoring), axis=1)
-        df['optimistic'] = df.apply(
-            lambda row: row['points'] + (1 - row['pct_played']) * row['projection'], axis=1)
+        df['optimistic'] = df['points'] + (1 - df['pct_played']) * df['projection']
         return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     def matchups(self, context) -> list[Matchup]:
