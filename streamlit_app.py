@@ -149,8 +149,7 @@ class Positions(pd.DataFrame):
             pd.Series(data.positions).value_counts(), how='inner')
         df = df.loc[df.index.repeat(df['count'])].reset_index(drop=True)
         counts = df.groupby('position').cumcount()
-        df['spos'] = df.apply(
-            lambda row: f"{row['position']}{counts[row.name]+1}" if counts[row.name] > 0 else row['position'], axis=1)
+        df['spos'] = df['position'] + (counts + 1).astype(str)
         df.set_index('spos', inplace=True)
         super().__init__(df[['position', 'eligible']])
 
