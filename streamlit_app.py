@@ -64,31 +64,25 @@ class Data:
         url = f"https://partners.api.espn.com/v2/sports/football/nfl/events?limit=50&season={season}&week={week}"
         resp = requests.get(url)
         data = resp.json()
-        df = pd.json_normalize([e['competitions'][0]
-                                for e in data['events']])
+        competitions = [e['competitions'][0] for e in data['events']]
+        df = pd.json_normalize(competitions)
         df = df.explode('competitors')
-        df['team'] = df['competitors'].apply(
-            lambda x: x['team']['abbreviation'])
+        df = df[['id', 'competitors', 'status.period', 'status.clock', 'status.type.shortDetail']]
+        df = pd.json_normalize(df.to_dict(orient='records'))  
+        df.rename(columns={
+            'competitors.team.abbreviation': 'team', 
+            'competitors.score.displayValue': 'score', 
+            'status.type.shortDetail': 'game_status',
+            'status.period': 'quarter',
+            'status.clock': 'clock',
+            'competitors.homeAway': 'home',
+            'id': 'game_id'
+        }, inplace=True)
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
-        df['score'] = df['competitors'].apply(
-            lambda x: x['score']['displayValue'])
-
-        def find_opponent(row):
-            same_game = df[df['id'] == row['id']]
-            opp = same_game[same_game['team'] != row['team']]
-            if not opp.empty:
-                return opp.iloc[0].to_dict()
-            return None
-        df['opponent'] = df.apply(find_opponent, axis=1)
-        df['opponent_score'] = df['opponent'].apply(
-            lambda x: x['score'] if x is not None else None)
-        df['opponent'] = df['opponent'].apply(
-            lambda x: x['team'] if x is not None else None)
+        df = df[['team', 'score', 'quarter', 'clock', 'game_status', 'home', 'game_id']]
+        df = df.merge(df, on='game_id', suffixes=('', '_opponent')).query('team != team_opponent')
         df.set_index('team', inplace=True)
-        df['quarter'] = df['status.period']
-        df['clock'] = df['status.clock']
-        df['game_status'] = df['status.type.shortDetail']
-        df['home'] = df['competitors'].apply(lambda x: x['homeAway'] == 'home')
+        df.rename(columns={'team_opponent': 'opponent', 'score_opponent': 'opponent_score'}, inplace=True)
         return df[['quarter', 'clock', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     @staticmethod
@@ -114,7 +108,8 @@ class Data:
 
         df = df.merge(users, left_on='owner_id', right_index=True, how='left')
         df.rename(columns={'display_name': 'username'}, inplace=True)
-        df['name'] = df['metadata.team_name'].replace('', pd.NA).fillna("Team " + df['username'])
+        df['name'] = df['metadata.team_name'].replace(
+            '', pd.NA).fillna("Team " + df['username'])
         return df[['avatar', 'username', 'name', 'record', 'rank']]
 
     @staticmethod
