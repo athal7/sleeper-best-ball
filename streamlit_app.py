@@ -11,6 +11,11 @@ METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
 
 
+def style(doc: Doc, **kwargs):
+    doc.attr(style='; '.join(
+        f'{k.replace("_", "-")}: {v}' for k, v in kwargs.items()))
+
+
 @dataclass
 class Data:
     league_id: InitVar[int]
@@ -191,19 +196,26 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    def render_game_status(self) -> str:
-        if self.bye:
-            return "BYE"
-        else:
-            status = [self.game_status]
-            if self.pct_played > 0:
-                status.append(f"{self.score}-{self.opponent_score}")
-            status.append("vs" if self.home else "@")
-            status.append(self.opponent)
-            return ' '.join(status)
+    def render_game_status(self, tag: Doc.tag):
+        with tag:
+            if self.bye:
+                tag.doc.text("Bye")
+            else:
+                tag.doc.text(self.game_status)
+                if self.pct_played > 0:
+                    tag.doc.text(f" {self.score}-{self.opponent_score}")
+                tag.doc.text(" vs " if self.home else " @ ")
+                tag.doc.text(self.opponent)
+            style(
+                tag.doc,
+                font_size='0.7rem',
+                font_style='italic',
+                opacity='0.7',
+                line_height='1rem'
+            )
 
     @property
-    def is_active(self) -> bool:
+    def is_live(self) -> bool:
         return self.pct_played < 1.0 and self.pct_played > 0.0
 
     @property
@@ -214,18 +226,46 @@ class Player:
     def is_out(self) -> bool:
         return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
-    def render_points(self) -> str:
-        if self.points == 0:
-            return "-"
-        return f"{self.points:.2f}"
+    def render_name(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(self.name)
+            style(
+                tag.doc,
+                font_size='0.9rem',
+                line_height='0.9rem',
+                text_overflow='ellipsis',
+                overflow='hidden',
+                white_space='nowrap',
+                font_weight='bold' if self.is_live else 'normal'
+            )
 
-    def render_projection(self) -> str:
-        if self.projection == 0:
-            return "-"
-        elif self.is_final:
-            return f"{self.projection:.2f}"
-        else:
-            return f"{self.optimistic:.2f}"
+    def render_points(self, tag: Doc.tag):
+        points = "-" if self.points == 0 else f"{self.points:.2f}"
+        with tag:
+            tag.doc.text(points)
+            style(
+                tag.doc,
+                font_size='0.9rem',
+                text_align='right',
+                line_height='0.9rem',
+                font_weight='bold' if self.is_live else 'normal'
+            )
+
+    def render_projection(self, tag: Doc.tag):
+        with tag:
+            if self.projection == 0:
+                tag.doc.text("-")
+            elif self.is_final:
+                tag.doc.text(f"{self.projection:.2f}")
+            else:
+                tag.doc.text(f"{self.optimistic:.2f}")
+            style(
+                tag.doc,
+                font_size='0.8rem',
+                text_align='right',
+                line_height='0.8rem',
+                opacity='0.7'
+            )
 
     INJURY_STATUS_MAP = {
         'Probable': 'P',
@@ -235,11 +275,18 @@ class Player:
         'IR': 'IR',
     }
 
-    def render_player_info(self) -> str:
-        info = f"{self.position} - {self.team}"
-        if self.injury_status:
-            info += f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
-        return info
+    def render_player_info(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(f"{self.position} - {self.team}")
+            if self.injury_status:
+                tag.doc.text(
+                    f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})")
+            style(
+                tag.doc,
+                font_size='0.7rem',
+                opacity='0.7',
+                line_height='0.7rem'
+            )
 
 
 class Roster(pd.DataFrame):
@@ -301,9 +348,6 @@ class Roster(pd.DataFrame):
             return Player(**df.iloc[0].to_dict())
         return Player()
 
-    def render_played_counts(self) -> str:
-        return f"{self.played.shape[0]} done / {self.in_progress.shape[0]} live / {self.left_to_play.shape[0]} left"
-
 
 @dataclass
 class FantasyTeam:
@@ -321,19 +365,70 @@ class FantasyTeam:
     def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: Positions):
         self.roster = Roster(all_players.loc[players], positions)
 
-    @property
-    def projection(self) -> float:
-        return f"{self.roster.projected_starters.optimistic.sum():.2f}"
+    def render_team_name(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(self.name)
+            style(
+                tag.doc,
+                font_size='1rem',
+                line_height='1.2rem'
+            )
 
-    @property
-    def points(self) -> float:
-        return f"{self.roster.current_starters.points.sum():.2f}"
+    def render_projection(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(
+                f"{self.roster.projected_starters.projection.sum():.2f}")
+            style(
+                tag.doc,
+                font_size='0.8rem',
+                text_align='right',
+                line_height='0.8rem',
+                opacity='0.7'
+            )
 
-    def render_username(self) -> str:
-        return f"@{self.username} · #{self.rank} ({self.record})"
+    def render_points(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(f"{self.roster.current_starters.points.sum():.2f}")
+            style(
+                tag.doc,
+                font_size='0.9rem',
+                text_align='right',
+                line_height='0.9rem'
+            )
 
-    def avatar_url(self):
-        return f"https://sleepercdn.com/avatars/thumbs/{self.avatar}"
+    def render_username(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(f"@{self.username} · #{self.rank} ({self.record})")
+            style(
+                tag.doc,
+                font_size='0.8rem',
+                opacity='0.7',
+                line_height='1rem'
+            )
+
+    def render_avatar(self, tag: Doc.tag):
+        image_src = f"https://sleepercdn.com/avatars/thumbs/{self.avatar}"
+        with tag:
+            with tag.doc.tag('img', src=image_src, alt='Avatar'):
+                style(
+                    tag.doc,
+                    width='35px',
+                    height='35px',
+                    border_radius='20px'
+                )
+
+    def render_played_counts(self, tag: Doc.tag):
+        with tag:
+            tag.doc.text(f"{self.roster.played.shape[0]} done / ")
+            tag.doc.text(f"{self.roster.in_progress.shape[0]} live / ")
+            tag.doc.text(f"{self.roster.left_to_play.shape[0]} left")
+            style(
+                tag.doc,
+                font_size='0.8rem',
+                font_style='italic',
+                line_height='0.8rem',
+                opacity='0.7'
+            )
 
 
 @dataclass
@@ -344,39 +439,36 @@ class Matchup:
 
     def render(self):
         doc, tag, text = Doc().tagtext()
-        with tag('table', klass='summary'):
+        with tag('table'):
+            style(doc, width='100%', max_width='600px', table_layout='fixed')
             with tag('tbody'):
                 with tag('tr'):
-                    with tag('td', colspan="2", rowspan="2"):
-                        doc.stag('img', klass='avatar', src=self.team1.avatar_url(), alt='Avatar')
-                    with tag('td', klass='actual'):
-                        text(self.team1.points)
-                    with tag('td', rowspan="5", klass='position'):
+                    self.team1.render_avatar(tag('td', colspan=2, rowspan=2))
+                    self.team1.render_points(tag('td'))
+                    with tag('td', rowspan="5"):
+                        style(
+                            doc,
+                            text_align='center',
+                            vertical_align='middle',
+                            font_size='0.6em',
+                            opacity='0.7'
+                        )
                         text("vs")
-                    with tag('td', colspan="2", rowspan="2"):
-                        doc.stag('img', klass='avatar', src=self.team2.avatar_url(), alt='Avatar')
-                    with tag('td', klass='actual'):
-                        text(self.team2.points)
+                    self.team2.render_avatar(tag('td', colspan=2, rowspan=2))
+                    self.team2.render_points(tag('td'))
                 with tag('tr'):
-                    with tag('td', klass='projection'):
-                        text(self.team1.projection)
-                    with tag('td', klass='projection'):
-                        text(self.team2.projection)
+                    self.team1.render_projection(tag('td'))
+                    self.team2.render_projection(tag('td'))
                 with tag('tr'):
-                    with tag('td', colspan="3"):
-                        text(self.team1.name)
-                    with tag('td', colspan="3"):
-                        text(self.team2.name)
+                    self.team1.render_team_name(tag('td', colspan="3"))
+                    self.team2.render_team_name(tag('td', colspan="3"))
                 with tag('tr'):
-                    with tag('td', colspan="3", klass='username'):
-                        text(self.team1.render_username())
-                    with tag('td', colspan="3", klass='username'):
-                        text(self.team2.render_username())
+                    self.team1.render_username(tag('td', colspan=3))
+                    self.team2.render_username(tag('td', colspan=3))
                 with tag('tr'):
-                    with tag('td', colspan="3", klass='yet-to-play'):
-                        text(self.team1.roster.render_played_counts())
-                    with tag('td', colspan="3", klass='yet-to-play'):
-                        text(self.team2.roster.render_played_counts())
+                    self.team1.render_played_counts(tag('td', colspan=3))
+                    self.team2.render_played_counts(tag('td', colspan=3))
+
         st.html(doc.getvalue())
         with st.expander("Show players"):
             self.render_players(self.positions.starting)
@@ -385,42 +477,42 @@ class Matchup:
 
     def render_players(self, positions: pd.DataFrame):
         doc, tag, text = Doc().tagtext()
-        with tag('table', klass='players'):
+        with tag('table'):
+            style(doc, width='100%', table_layout='fixed')
             with tag('tbody'):
                 for pos, row in positions.iterrows():
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
-                        with tag('td', colspan="2", klass="player"):
-                            if p1.is_active:
-                                doc.add_class("live")
-                            text(p1.name)
-                        with tag('td', klass='actual'):
-                            text(p1.render_points())
-                        with tag('td', rowspan="3", klass='position'):
+                        p1.render_name(tag('td', colspan=2))
+                        p1.render_points(tag('td'))
+                        with tag('td', rowspan="3"):
                             text(row['position'])
-                        with tag('td', colspan="2", klass="player"):
-                            if p2.is_active:
-                                doc.add_class("live")
-                            text(p2.name)
-                        with tag('td', klass='actual'):
-                            text(p2.render_points())
+                            style(
+                                doc,
+                                text_align='center',
+                                vertical_align='middle',
+                                font_size='0.6rem',
+                                opacity='0.7',
+                            )
+
+                        p2.render_name(tag('td', colspan=2))
+                        p2.render_points(tag('td'))
                     with tag('tr'):
-                        with tag('td', colspan="2", klass='player-info'):
-                            text(p1.render_player_info())
-                        with tag('td', klass='projection'):
-                            text(p1.render_projection())
-                        with tag('td', colspan="2", klass='player-info'):
-                            text(p2.render_player_info())
-                        with tag('td', klass='projection'):
-                            text(p2.render_projection())
+                        p1.render_player_info(tag('td', colspan=2))
+                        p1.render_projection(tag('td'))
+                        p2.render_player_info(tag('td', colspan=2))
+                        p2.render_projection(tag('td'))
                     with tag('tr'):
-                        with tag('td', colspan="3", klass='player-status'):
-                            text(p1.render_game_status())
-                        with tag('td', colspan="3", klass='player-status'):
-                            text(p2.render_game_status())
+                        p1.render_game_status(tag('td', colspan=3))
+                        p2.render_game_status(tag('td', colspan=3))
                     with tag('td', colspan="7", klass='label'):
-                        doc.stag('hr')
+                        with doc.tag('hr'):
+                            style(
+                                doc,
+                                border='none',
+                                border_top='1px solid rgba(128, 128, 128, 0.3)',
+                            )
         st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
@@ -529,102 +621,10 @@ class Context:
             self.leagues.append(League(data=data))
 
 
-def _style():
-    st.html("""
-    <style>
-    h1 {
-        font-size: 2em !important;
-    }
-    table {
-        width: 100%; 
-        max-width: 600px; 
-        border-spacing:0; 
-        padding:0; 
-        text-align: left;
-        table-layout: fixed;
-    }
-    td.username {
-        font-size: 0.8em;
-        opacity: 0.7;
-        line-height: 1em;
-    }
-    td.yet-to-play {
-        font-size: 0.8em;
-        opacity: 0.7;
-        line-height: 1.5em;
-        font-style: italic;
-    }
-    td {
-        padding: 0;
-        margin: 0;
-    }
-    td.actual {
-        font-size: 0.9em;
-        text-align: right;
-        line-height: 0.9em;
-    }
-    td.projection {
-        opacity: 0.7;
-        font-size: 0.8em;
-        text-align: right;
-        line-height: 0.8em;
-    }
-    td.position {
-        text-align: center;
-        vertical-align: middle;
-        font-size: 0.6em;
-        opacity: 0.7;
-    }
-    td.player {
-        font-size: 0.9em;
-        line-height: 0.9em;
-        text-overflow: ellipsis;
-        overflow: hidden;
-        white-space: nowrap;
-    }
-    td.player-info {
-        font-size: 0.7em;
-        opacity: 0.7;
-    }
-    td.player-status {
-        font-size: 0.7em;
-        font-style: italic;
-        opacity: 0.7;
-        line-height: 1em;
-    }
-    td.label {
-        margin: 0;
-        padding: 0;
-        font-size: 0.7em;
-        font-style: normal;
-        opacity: 0.7;
-    }
-    td.live {
-        font-weight: bold;
-    }
-    img.avatar {
-        width: 35px;
-        height: 35px;
-        border-radius: 20px;
-    }
-    hr {
-        border: none;
-        border-top: 1px solid rgba(128, 128, 128, 0.3);
-    }
-
-    @media (prefers-color-scheme: dark) {
-        hr {
-            border-top: 1px solid rgba(255, 255, 255, 0.3);
-        }
-    }
-    </style>
-    """)
-
-
 def main():
-    _style()
     context = Context()
     if not context.leagues:
+        st.html("<style> h1 { font-size: 2rem !important; }</style>")
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
         st.text_input("Enter your Sleeper username:", key='username_input',
