@@ -11,9 +11,12 @@ METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
 
 
+def s(**kwargs):
+    return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in kwargs.items())
+
+
 def style(doc: Doc, **kwargs):
-    doc.attr(style='; '.join(
-        f'{k.replace("_", "-")}: {v}' for k, v in kwargs.items()))
+    doc.attr(style=s(**kwargs))
 
 
 @dataclass
@@ -438,22 +441,19 @@ class Matchup:
     positions: Positions
 
     def render(self):
-        doc, tag, text = Doc().tagtext()
+        doc, tag, text, line = Doc().ttl()
         with tag('table'):
             style(doc, width='100%', max_width='600px', table_layout='fixed')
             with tag('tbody'):
                 with tag('tr'):
                     self.team1.render_avatar(tag('td', colspan=2, rowspan=2))
                     self.team1.render_points(tag('td'))
-                    with tag('td', rowspan="5"):
-                        style(
-                            doc,
-                            text_align='center',
-                            vertical_align='middle',
-                            font_size='0.6em',
-                            opacity='0.7'
-                        )
-                        text("vs")
+                    line('td', "vs", rowspan="5", style=s(
+                        text_align='center',
+                        vertical_align='middle',
+                        font_size='0.6em',
+                        opacity='0.7'
+                    ))
                     self.team2.render_avatar(tag('td', colspan=2, rowspan=2))
                     self.team2.render_points(tag('td'))
                 with tag('tr'):
@@ -476,7 +476,7 @@ class Matchup:
                 self.render_players(self.positions.bench)
 
     def render_players(self, positions: pd.DataFrame):
-        doc, tag, text = Doc().tagtext()
+        doc, tag, text, line = Doc().ttl()
         with tag('table'):
             style(doc, width='100%', table_layout='fixed')
             with tag('tbody'):
@@ -486,15 +486,12 @@ class Matchup:
                     with tag('tr'):
                         p1.render_name(tag('td', colspan=2))
                         p1.render_points(tag('td'))
-                        with tag('td', rowspan="3"):
-                            text(row['position'])
-                            style(
-                                doc,
-                                text_align='center',
-                                vertical_align='middle',
-                                font_size='0.6rem',
-                                opacity='0.7',
-                            )
+                        line('td', row['position'], rowspan=3, style=s(
+                            text_align='center',
+                            vertical_align='middle',
+                            font_size='0.6rem',
+                            opacity='0.7',
+                        ))
 
                         p2.render_name(tag('td', colspan=2))
                         p2.render_points(tag('td'))
@@ -507,12 +504,10 @@ class Matchup:
                         p1.render_game_status(tag('td', colspan=3))
                         p2.render_game_status(tag('td', colspan=3))
                     with tag('td', colspan="7", klass='label'):
-                        with doc.tag('hr'):
-                            style(
-                                doc,
-                                border='none',
-                                border_top='1px solid rgba(128, 128, 128, 0.3)',
-                            )
+                        doc.stag('hr', style=s(
+                            border='none',
+                            border_top='1px solid rgba(128, 128, 128, 0.3)',
+                        ))
         st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
