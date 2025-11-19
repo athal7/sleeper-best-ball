@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from dataclasses import InitVar, dataclass, field
 from typing import Optional, List
+from yattag import Doc
 
 import sleeper_wrapper as sleeper
 
@@ -67,11 +68,12 @@ class Data:
         competitions = [e['competitions'][0] for e in data['events']]
         df = pd.json_normalize(competitions)
         df = df.explode('competitors')
-        df = df[['id', 'competitors', 'status.period', 'status.clock', 'status.type.shortDetail']]
-        df = pd.json_normalize(df.to_dict(orient='records'))  
+        df = df[['id', 'competitors', 'status.period',
+                 'status.clock', 'status.type.shortDetail']]
+        df = pd.json_normalize(df.to_dict(orient='records'))
         df.rename(columns={
-            'competitors.team.abbreviation': 'team', 
-            'competitors.score.displayValue': 'score', 
+            'competitors.team.abbreviation': 'team',
+            'competitors.score.displayValue': 'score',
             'status.type.shortDetail': 'game_status',
             'status.period': 'quarter',
             'status.clock': 'clock',
@@ -79,10 +81,13 @@ class Data:
             'id': 'game_id'
         }, inplace=True)
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
-        df = df[['team', 'score', 'quarter', 'clock', 'game_status', 'home', 'game_id']]
-        df = df.merge(df, on='game_id', suffixes=('', '_opponent')).query('team != team_opponent')
+        df = df[['team', 'score', 'quarter', 'clock',
+                 'game_status', 'home', 'game_id']]
+        df = df.merge(df, on='game_id', suffixes=(
+            '', '_opponent')).query('team != team_opponent')
         df.set_index('team', inplace=True)
-        df.rename(columns={'team_opponent': 'opponent', 'score_opponent': 'opponent_score'}, inplace=True)
+        df.rename(columns={'team_opponent': 'opponent',
+                  'score_opponent': 'opponent_score'}, inplace=True)
         return df[['quarter', 'clock', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     @staticmethod
@@ -186,7 +191,7 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    def render_status(self) -> str:
+    def render_game_status(self) -> str:
         if self.bye:
             return "BYE"
         else:
@@ -230,10 +235,11 @@ class Player:
         'IR': 'IR',
     }
 
-    def render_injury_status(self) -> str:
+    def render_player_info(self) -> str:
+        info = f"{self.position} - {self.team}"
         if self.injury_status:
-            return f"({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
-        return ""
+            info += f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
+        return info
 
 
 class Roster(pd.DataFrame):
@@ -326,6 +332,9 @@ class FantasyTeam:
     def render_username(self) -> str:
         return f"@{self.username} · #{self.rank} ({self.record})"
 
+    def avatar_url(self):
+        return f"https://sleepercdn.com/avatars/thumbs/{self.avatar}"
+
 
 @dataclass
 class Matchup:
@@ -334,71 +343,85 @@ class Matchup:
     positions: Positions
 
     def render(self):
-        st.html(f"""
-        <table class="summary">
-            <tbody>
-                <tr>
-                    <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{self.team1.avatar}"></td>
-                    <td class="actual">{self.team1.points}</td>
-                    <td rowspan=5 class="position">vs</td>
-                    <td colspan=2 rowspan=2><img class="avatar" src="https://sleepercdn.com/avatars/thumbs/{self.team2.avatar}"></td>
-                    <td class="actual">{self.team2.points}</td>
-                </tr>
-                <tr>
-                    <td class="projection">{self.team1.projection}</td>
-                    <td class="projection">{self.team2.projection}</td>
-                </tr>
-                <tr>
-                    <td colspan=3>{self.team1.name}</td>
-                    <td colspan=3>{self.team2.name}</td>
-                </tr>
-                <tr>
-                    <td colspan=3 class="username">{self.team1.render_username()}</td>
-                    <td colspan=3 class="username">{self.team2.render_username()}</td>
-                </tr>
-                <tr>
-                    <td colspan=3 class="yet-to-play">{self.team1.roster.render_played_counts()}</td>
-                    <td colspan=3 class="yet-to-play">{self.team2.roster.render_played_counts()}</td>
-                </tr>
-            </tbody>
-        </table>
-        """)
+        doc, tag, text = Doc().tagtext()
+        with tag('table', klass='summary'):
+            with tag('tbody'):
+                with tag('tr'):
+                    with tag('td', colspan="2", rowspan="2"):
+                        doc.stag('img', klass='avatar', src=self.team1.avatar_url(), alt='Avatar')
+                    with tag('td', klass='actual'):
+                        text(self.team1.points)
+                    with tag('td', rowspan="5", klass='position'):
+                        text("vs")
+                    with tag('td', colspan="2", rowspan="2"):
+                        doc.stag('img', klass='avatar', src=self.team2.avatar_url(), alt='Avatar')
+                    with tag('td', klass='actual'):
+                        text(self.team2.points)
+                with tag('tr'):
+                    with tag('td', klass='projection'):
+                        text(self.team1.projection)
+                    with tag('td', klass='projection'):
+                        text(self.team2.projection)
+                with tag('tr'):
+                    with tag('td', colspan="3"):
+                        text(self.team1.name)
+                    with tag('td', colspan="3"):
+                        text(self.team2.name)
+                with tag('tr'):
+                    with tag('td', colspan="3", klass='username'):
+                        text(self.team1.render_username())
+                    with tag('td', colspan="3", klass='username'):
+                        text(self.team2.render_username())
+                with tag('tr'):
+                    with tag('td', colspan="3", klass='yet-to-play'):
+                        text(self.team1.roster.render_played_counts())
+                    with tag('td', colspan="3", klass='yet-to-play'):
+                        text(self.team2.roster.render_played_counts())
+        st.html(doc.getvalue())
         with st.expander("Show players"):
             self.render_players(self.positions.starting)
             with st.expander("Show bench"):
                 self.render_players(self.positions.bench)
 
     def render_players(self, positions: pd.DataFrame):
-        rows = []
-        for pos, row in positions.iterrows():
-            p1 = self.team1.roster.at_position(pos)
-            p2 = self.team2.roster.at_position(pos)
-            rows.append(f"""                    
-                <tr>
-                <td colspan=2 class="player {'live' if p1.is_active else ''}">{p1.name}</td>
-                <td class="actual">{p1.render_points()}</td>
-                <td rowspan=3 class="position">{row['position']}</td>
-                <td colspan=2 class="player {'live' if p2.is_active else ''}">{p2.name}</td>
-                <td class="actual">{p2.render_points()}</td>
-                </tr>
-                <tr>
-                <td colspan=2 class="player-info">{p1.position} - {p1.team} {p1.render_injury_status()}</td>
-                <td class="projection">{p1.render_projection()}</td>
-                <td colspan=2 class="player-info">{p2.position} - {p2.team} {p2.render_injury_status()}</td>
-                <td class="projection">{p2.render_projection()}</td>
-                </tr>
-                <tr>
-                <td colspan=3 class="player-status">{p1.render_status()}</td>
-                <td colspan=3 class="player-status">{p2.render_status()}</td>
-                </tr>
-            """)
-        st.html(f"""
-        <table class="players">
-            <tbody>
-                {'<tr><td colspan="7"><hr></td></tr>'.join(rows)}
-            </tbody>
-        </table>
-        """)
+        doc, tag, text = Doc().tagtext()
+        with tag('table', klass='players'):
+            with tag('tbody'):
+                for pos, row in positions.iterrows():
+                    p1 = self.team1.roster.at_position(pos)
+                    p2 = self.team2.roster.at_position(pos)
+                    with tag('tr'):
+                        with tag('td', colspan="2", klass="player"):
+                            if p1.is_active:
+                                doc.add_class("live")
+                            text(p1.name)
+                        with tag('td', klass='actual'):
+                            text(p1.render_points())
+                        with tag('td', rowspan="3", klass='position'):
+                            text(row['position'])
+                        with tag('td', colspan="2", klass="player"):
+                            if p2.is_active:
+                                doc.add_class("live")
+                            text(p2.name)
+                        with tag('td', klass='actual'):
+                            text(p2.render_points())
+                    with tag('tr'):
+                        with tag('td', colspan="2", klass='player-info'):
+                            text(p1.render_player_info())
+                        with tag('td', klass='projection'):
+                            text(p1.render_projection())
+                        with tag('td', colspan="2", klass='player-info'):
+                            text(p2.render_player_info())
+                        with tag('td', klass='projection'):
+                            text(p2.render_projection())
+                    with tag('tr'):
+                        with tag('td', colspan="3", klass='player-status'):
+                            text(p1.render_game_status())
+                        with tag('td', colspan="3", klass='player-status'):
+                            text(p2.render_game_status())
+                    with tag('td', colspan="7", klass='label'):
+                        doc.stag('hr')
+        st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
         return self.team1.username == username or self.team2.username == username
@@ -442,7 +465,8 @@ class League:
             self._calc_points_from_stats(self.data.stats, self.data.scoring), axis=1)
         df['projection'] = df.apply(
             self._calc_points_from_stats(self.data.projections, self.data.scoring), axis=1)
-        df['optimistic'] = df['points'] + (1 - df['pct_played']) * df['projection']
+        df['optimistic'] = df['points'] + \
+            (1 - df['pct_played']) * df['projection']
         return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
 
     def matchups(self, context) -> list[Matchup]:
