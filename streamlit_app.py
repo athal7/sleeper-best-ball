@@ -11,13 +11,8 @@ METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
 
 
-def s(**kwargs):
+def style(**kwargs):
     return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in kwargs.items())
-
-
-def style(doc: Doc, **kwargs):
-    doc.attr(style=s(**kwargs))
-
 
 @dataclass
 class Data:
@@ -199,23 +194,11 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    def render_game_status(self, tag: Doc.tag):
-        with tag:
-            if self.bye:
-                tag.doc.text("Bye")
-            else:
-                tag.doc.text(self.game_status)
-                if self.pct_played > 0:
-                    tag.doc.text(f" {self.score}-{self.opponent_score}")
-                tag.doc.text(" vs " if self.home else " @ ")
-                tag.doc.text(self.opponent)
-            style(
-                tag.doc,
-                font_size='0.7rem',
-                font_style='italic',
-                opacity='0.7',
-                line_height='1rem'
-            )
+    def get_game_status(self) -> str:
+        if self.bye:
+            return "Bye"
+        else:
+            return f"{self.game_status} {self.score}-{self.opponent_score} {'vs' if self.home else '@'} {self.opponent}"
 
     @property
     def is_live(self) -> bool:
@@ -229,46 +212,16 @@ class Player:
     def is_out(self) -> bool:
         return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
-    def render_name(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(self.name)
-            style(
-                tag.doc,
-                font_size='0.9rem',
-                line_height='0.9rem',
-                text_overflow='ellipsis',
-                overflow='hidden',
-                white_space='nowrap',
-                font_weight='bold' if self.is_live else 'normal'
-            )
+    def get_points(self) -> str:
+        return "-" if self.points == 0 else f"{self.points:.2f}"
 
-    def render_points(self, tag: Doc.tag):
-        points = "-" if self.points == 0 else f"{self.points:.2f}"
-        with tag:
-            tag.doc.text(points)
-            style(
-                tag.doc,
-                font_size='0.9rem',
-                text_align='right',
-                line_height='0.9rem',
-                font_weight='bold' if self.is_live else 'normal'
-            )
-
-    def render_projection(self, tag: Doc.tag):
-        with tag:
-            if self.projection == 0:
-                tag.doc.text("-")
-            elif self.is_final:
-                tag.doc.text(f"{self.projection:.2f}")
-            else:
-                tag.doc.text(f"{self.optimistic:.2f}")
-            style(
-                tag.doc,
-                font_size='0.8rem',
-                text_align='right',
-                line_height='0.8rem',
-                opacity='0.7'
-            )
+    def get_projection(self) -> str:
+        if self.projection == 0:
+            return "-"
+        elif self.is_final:
+            return f"{self.projection:.2f}"
+        else:
+            return f"{self.optimistic:.2f}"
 
     INJURY_STATUS_MAP = {
         'Probable': 'P',
@@ -278,18 +231,12 @@ class Player:
         'IR': 'IR',
     }
 
-    def render_player_info(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(f"{self.position} - {self.team}")
-            if self.injury_status:
-                tag.doc.text(
-                    f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})")
-            style(
-                tag.doc,
-                font_size='0.7rem',
-                opacity='0.7',
-                line_height='0.7rem'
-            )
+    @property
+    def player_info(self) -> str:
+        info = f"{self.position} - {self.team}"
+        if self.injury_status:
+            info += f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
+        return info
 
 
 class Roster(pd.DataFrame):
@@ -368,70 +315,25 @@ class FantasyTeam:
     def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: Positions):
         self.roster = Roster(all_players.loc[players], positions)
 
-    def render_team_name(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(self.name)
-            style(
-                tag.doc,
-                font_size='1rem',
-                line_height='1.2rem'
-            )
+    @property
+    def avatar_url(self) -> str:
+        return f"https://sleepercdn.com/avatars/thumbs/{self.avatar}"
 
-    def render_projection(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(
-                f"{self.roster.projected_starters.projection.sum():.2f}")
-            style(
-                tag.doc,
-                font_size='0.8rem',
-                text_align='right',
-                line_height='0.8rem',
-                opacity='0.7'
-            )
+    @property
+    def points(self) -> str:
+        return f"{self.roster.current_starters.points.sum():.2f}"
 
-    def render_points(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(f"{self.roster.current_starters.points.sum():.2f}")
-            style(
-                tag.doc,
-                font_size='0.9rem',
-                text_align='right',
-                line_height='0.9rem'
-            )
+    @property
+    def projection(self) -> str:
+        return f"{self.roster.projected_starters.projection.sum():.2f}"
 
-    def render_username(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(f"@{self.username} · #{self.rank} ({self.record})")
-            style(
-                tag.doc,
-                font_size='0.8rem',
-                opacity='0.7',
-                line_height='1rem'
-            )
+    @property
+    def team_info(self) -> str:
+        return f"@{self.username} · #{self.rank} ({self.record})"
 
-    def render_avatar(self, tag: Doc.tag):
-        image_src = f"https://sleepercdn.com/avatars/thumbs/{self.avatar}"
-        with tag:
-            with tag.doc.tag('img', src=image_src, alt='Avatar'):
-                style(
-                    tag.doc,
-                    width='35px',
-                    height='35px',
-                    border_radius='20px'
-                )
-
-    def render_played_counts(self, tag: Doc.tag):
-        with tag:
-            tag.doc.text(f"{self.roster.played.shape[0]} done / ")
-            tag.doc.text(f"{self.roster.in_progress.shape[0]} live / ")
-            tag.doc.text(f"{self.roster.left_to_play.shape[0]} left")
-            style(
-                tag.doc,
-                font_size='0.8rem',
-                font_style='italic',
-                line_height='0.8rem',
-                opacity='0.7'
-            )
+    @property
+    def played_counts(self) -> str:
+        return f"{self.roster.played.shape[0]} done / {self.roster.in_progress.shape[0]} live / {self.roster.left_to_play.shape[0]} left"
 
 
 @dataclass
@@ -441,33 +343,45 @@ class Matchup:
     positions: Positions
 
     def render(self):
+        t1 = self.team1
+        t2 = self.team2
         doc, tag, text, line = Doc().ttl()
-        with tag('table'):
-            style(doc, width='100%', max_width='600px', table_layout='fixed')
+        s = {
+            'table': style(width='100%', max_width='600px', table_layout='fixed'),
+            'avatar': style(width='35px', height='35px', border_radius='20px'),
+            'name': style(font_size='1rem', line_height='1.2rem'),
+            'info': style(font_size='0.8rem', line_height='1rem', opacity='0.7'),
+            'points': style(font_size='0.9rem', line_height='0.9rem', text_align='right'),
+            'projection': style(font_size='0.8rem', text_align='right', line_height='0.8rem', opacity='0.7'),
+            'label': style(text_align='center', vertical_align='middle', font_size='0.6em', opacity='0.7'),
+            'played_counts': style(font_size='0.8rem', font_style='italic', line_height='0.8rem', opacity='0.7'),
+        }
+        with tag('table', style=s['table']):
             with tag('tbody'):
                 with tag('tr'):
-                    self.team1.render_avatar(tag('td', colspan=2, rowspan=2))
-                    self.team1.render_points(tag('td'))
-                    line('td', "vs", rowspan="5", style=s(
-                        text_align='center',
-                        vertical_align='middle',
-                        font_size='0.6em',
-                        opacity='0.7'
-                    ))
-                    self.team2.render_avatar(tag('td', colspan=2, rowspan=2))
-                    self.team2.render_points(tag('td'))
+                    with tag('td', colspan=2, rowspan=2):
+                        doc.stag('img', src=t1.avatar_url,
+                                 alt='Avatar', style=s['avatar'])
+                    line('td', t1.points, style=s['points'])
+                    line('td', "vs", rowspan="5", style=s['label'])
+                    with tag('td', colspan=2, rowspan=2):
+                        doc.stag('img', src=t2.avatar_url,
+                                 alt='Avatar', style=s['avatar'])
+                    line('td', t2.points, style=s['points'])
                 with tag('tr'):
-                    self.team1.render_projection(tag('td'))
-                    self.team2.render_projection(tag('td'))
+                    line('td', t1.projection, style=s['projection'])
+                    line('td', t2.projection, style=s['projection'])
                 with tag('tr'):
-                    self.team1.render_team_name(tag('td', colspan="3"))
-                    self.team2.render_team_name(tag('td', colspan="3"))
+                    line('td', t1.name, colspan=3, style=s['name'])
+                    line('td', t2.name, colspan=3, style=s['name'])
                 with tag('tr'):
-                    self.team1.render_username(tag('td', colspan=3))
-                    self.team2.render_username(tag('td', colspan=3))
+                    line('td', t1.team_info, colspan=3, style=s['info'])
+                    line('td', t2.team_info, colspan=3, style=s['info'])
                 with tag('tr'):
-                    self.team1.render_played_counts(tag('td', colspan=3))
-                    self.team2.render_played_counts(tag('td', colspan=3))
+                    line('td', t1.played_counts, colspan=3,
+                         style=s['played_counts'])
+                    line('td', t2.played_counts, colspan=3,
+                         style=s['played_counts'])
 
         st.html(doc.getvalue())
         with st.expander("Show players"):
@@ -476,35 +390,43 @@ class Matchup:
                 self.render_players(self.positions.bench)
 
     def render_players(self, positions: pd.DataFrame):
+        s = {
+            'table': style(width='100%', table_layout='fixed'),
+            'name': style(font_size='0.9rem', line_height='0.9rem', text_overflow='ellipsis', overflow='hidden', white_space='nowrap'),
+            'name_live': style(font_size='0.9rem', line_height='0.9rem', text_overflow='ellipsis', overflow='hidden', white_space='nowrap', font_weight='bold'),
+            'points': style(font_size='0.9rem', text_align='right', line_height='0.9rem', font_weight='bold'),
+            'projection': style(font_size='0.8rem', text_align='right', line_height='0.8rem', opacity='0.7'),
+            'info': style(font_size='0.7rem', line_height='0.7rem', opacity='0.7'),
+            'game_status': style(font_size='0.7rem', font_style='italic', opacity='0.7', line_height='0.7rem'),
+            'label': style(text_align='center', vertical_align='middle', font_size='0.6em', opacity='0.7'),
+        }
         doc, tag, text, line = Doc().ttl()
-        with tag('table'):
-            style(doc, width='100%', table_layout='fixed')
+        with tag('table', style=s['table']):
             with tag('tbody'):
                 for pos, row in positions.iterrows():
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
-                        p1.render_name(tag('td', colspan=2))
-                        p1.render_points(tag('td'))
-                        line('td', row['position'], rowspan=3, style=s(
-                            text_align='center',
-                            vertical_align='middle',
-                            font_size='0.6rem',
-                            opacity='0.7',
-                        ))
-
-                        p2.render_name(tag('td', colspan=2))
-                        p2.render_points(tag('td'))
+                        line('td', p1.name, colspan=2,
+                             style=s['name_live'] if p1.is_live else s['name'])
+                        line('td', p1.get_points(), style=s['points'])
+                        line('td', row['position'],
+                             rowspan=3, style=s['label'])
+                        line('td', p2.name, colspan=2,
+                             style=s['name_live'] if p2.is_live else s['name'])
+                        line('td', p2.get_points(), style=s['points'])
                     with tag('tr'):
-                        p1.render_player_info(tag('td', colspan=2))
-                        p1.render_projection(tag('td'))
-                        p2.render_player_info(tag('td', colspan=2))
-                        p2.render_projection(tag('td'))
+                        line('td', p1.player_info, colspan=2, style=s['info'])
+                        line('td', p1.get_projection(), style=s['projection'])
+                        line('td', p2.player_info, colspan=2, style=s['info'])
+                        line('td', p2.get_projection(), style=s['projection'])
                     with tag('tr'):
-                        p1.render_game_status(tag('td', colspan=3))
-                        p2.render_game_status(tag('td', colspan=3))
+                        line('td', p1.get_game_status(),
+                             colspan=3, style=s['game_status'])
+                        line('td', p2.get_game_status(),
+                             colspan=3, style=s['game_status'])
                     with tag('td', colspan="7", klass='label'):
-                        doc.stag('hr', style=s(
+                        doc.stag('hr', style=style(
                             border='none',
                             border_top='1px solid rgba(128, 128, 128, 0.3)',
                         ))
