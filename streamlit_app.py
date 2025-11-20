@@ -11,8 +11,19 @@ METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
 
 
-def style(**kwargs):
-    return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in kwargs.items())
+class Style():
+    def __init__(self, styles: dict):
+        self.styles = styles
+
+    def get(self, label: str) -> str:
+        return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in self.styles.get(label, {}).items())
+
+    def set(self, label: str, **kwargs) -> 'Style':
+        if label not in self.styles:
+            self.styles[label] = {}
+        self.styles[label].update(kwargs)
+        return self
+
 
 @dataclass
 class Data:
@@ -351,88 +362,81 @@ class Matchup:
         t1 = self.team1
         t2 = self.team2
         doc, tag, text, line = Doc().ttl()
-        s = {
-            'table': style(width='100%', max_width='600px', table_layout='fixed'),
-            'avatar': style(width='35px', height='35px', border_radius='20px'),
-            'name': style(font_size='1rem', line_height='1.2rem'),
-            'info': style(font_size='0.8rem', line_height='1rem', opacity='0.7'),
-            'points': style(font_size='0.9rem', line_height='0.9rem', text_align='right'),
-            'projection': style(font_size='0.8rem', text_align='right', line_height='0.8rem', opacity='0.7'),
-            'label': style(text_align='center', vertical_align='middle', font_size='0.6em', opacity='0.7'),
-            'played_counts': style(font_size='0.8rem', font_style='italic', line_height='0.8rem', opacity='0.7'),
-        }
-        with tag('table', style=s['table']):
+        s = Style({
+            'table': {'width': '100%', 'max-width': '600px', 'table-layout': 'fixed'},
+            'avatar': {'width': '35px', 'height': '35px', 'border-radius': '20px'},
+            'name': {'line-height': '1.2em', },
+            'info': {'font-size': '0.8em', 'line-height': '0.8em', 'opacity': '0.8'},
+            'points': {'line-height': '1.2em', 'text-align': 'right'},
+            'projection': {'font-size': '0.8em', 'text-align': 'right', 'line-height': '0.8em', 'opacity': '0.8'},
+            'label': {'text-align': 'center', 'vertical-align': 'middle', 'font-size': '0.6em', 'opacity': '0.8'},
+            'status': {'font-size': '0.8em', 'font-style': 'italic', 'line-height': '1em', 'opacity': '0.6'},
+            'hr': {'border': 'none', 'border-top': '1px solid rgba(128, 128, 128, 0.3)'},
+        })
+        with tag('table', style=s.get('table')):
             with tag('tbody'):
                 with tag('tr'):
                     with tag('td', colspan=2, rowspan=2):
                         doc.stag('img', src=t1.avatar_url,
-                                 alt='Avatar', style=s['avatar'])
-                    line('td', t1.points, style=s['points'])
-                    line('td', "vs", rowspan="5", style=s['label'])
+                                 alt='Avatar', style=s.get('avatar'))
+                    line('td', t1.points, style=s.get('points'))
+                    line('td', "vs", rowspan="5", style=s.get('label'))
                     with tag('td', colspan=2, rowspan=2):
                         doc.stag('img', src=t2.avatar_url,
-                                 alt='Avatar', style=s['avatar'])
-                    line('td', t2.points, style=s['points'])
+                                 alt='Avatar', style=s.get('avatar'))
+                    line('td', t2.points, style=s.get('points'))
                 with tag('tr'):
-                    line('td', t1.projection, style=s['projection'])
-                    line('td', t2.projection, style=s['projection'])
+                    line('td', t1.projection, style=s.get('projection'))
+                    line('td', t2.projection, style=s.get('projection'))
                 with tag('tr'):
-                    line('td', t1.name, colspan=3, style=s['name'])
-                    line('td', t2.name, colspan=3, style=s['name'])
+                    line('td', t1.name, colspan=3, style=s.get('name'))
+                    line('td', t2.name, colspan=3, style=s.get('name'))
                 with tag('tr'):
-                    line('td', t1.team_info, colspan=3, style=s['info'])
-                    line('td', t2.team_info, colspan=3, style=s['info'])
+                    line('td', t1.team_info, colspan=3, style=s.get('info'))
+                    line('td', t2.team_info, colspan=3, style=s.get('info'))
                 with tag('tr'):
-                    line('td', t1.played_counts, colspan=3,
-                         style=s['played_counts'])
-                    line('td', t2.played_counts, colspan=3,
-                         style=s['played_counts'])
+                    line('td', t1.played_counts,
+                         colspan=3, style=s.get('status'))
+                    line('td', t2.played_counts,
+                         colspan=3, style=s.get('status'))
 
         st.html(doc.getvalue())
         with st.expander("Show players"):
-            self.render_players(self.positions)
+            self.render_players(self.positions, s)
 
-    def render_players(self, positions: pd.DataFrame):
-        s = {
-            'table': style(width='100%', table_layout='fixed'),
-            'name': style(font_size='0.9rem', line_height='0.9rem', text_overflow='ellipsis', overflow='hidden', white_space='nowrap'),
-            'name_live': style(font_size='0.9rem', line_height='0.9rem', text_overflow='ellipsis', overflow='hidden', white_space='nowrap', font_weight='bold'),
-            'points': style(font_size='0.9rem', text_align='right', line_height='0.9rem', font_weight='bold'),
-            'projection': style(font_size='0.8rem', text_align='right', line_height='0.8rem', opacity='0.7'),
-            'info': style(font_size='0.7rem', line_height='0.7rem', opacity='0.7'),
-            'game_status': style(font_size='0.7rem', font_style='italic', opacity='0.7', line_height='0.7rem'),
-            'label': style(text_align='center', vertical_align='middle', font_size='0.6em', opacity='0.7'),
-        }
+    def render_players(self, positions: pd.DataFrame, s: Style):
+        s.set('table', font_size="0.9em")
         doc, tag, text, line = Doc().ttl()
-        with tag('table', style=s['table']):
+        with tag('table', style=s.get('table')):
             with tag('tbody'):
                 for pos, row in positions.iterrows():
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
                         line('td', p1.name, colspan=2,
-                             style=s['name_live'] if p1.is_live else s['name'])
-                        line('td', p1.get_points(), style=s['points'])
+                             style=f"{s.get('name')} {'font-weight: bold;' if p1.is_live else ''}")
+                        line('td', p1.get_points(), style=s.get('points'))
                         line('td', row['position'],
-                             rowspan=3, style=s['label'])
+                             rowspan=3, style=s.get('label'))
                         line('td', p2.name, colspan=2,
-                             style=s['name_live'] if p2.is_live else s['name'])
-                        line('td', p2.get_points(), style=s['points'])
+                             style=f"{s.get('name')} {'font-weight: bold;' if p2.is_live else ''}")
+                        line('td', p2.get_points(), style=s.get('points'))
                     with tag('tr'):
-                        line('td', p1.player_info, colspan=2, style=s['info'])
-                        line('td', p1.get_projection(), style=s['projection'])
-                        line('td', p2.player_info, colspan=2, style=s['info'])
-                        line('td', p2.get_projection(), style=s['projection'])
+                        line('td', p1.player_info,
+                             colspan=2, style=s.get('info'))
+                        line('td', p1.get_projection(),
+                             style=s.get('projection'))
+                        line('td', p2.player_info,
+                             colspan=2, style=s.get('info'))
+                        line('td', p2.get_projection(),
+                             style=s.get('projection'))
                     with tag('tr'):
                         line('td', p1.get_game_status(),
-                             colspan=3, style=s['game_status'])
+                             colspan=3, style=s.get('status'))
                         line('td', p2.get_game_status(),
-                             colspan=3, style=s['game_status'])
+                             colspan=3, style=s.get('status'))
                     with tag('td', colspan="7", klass='label'):
-                        doc.stag('hr', style=style(
-                            border='none',
-                            border_top='1px solid rgba(128, 128, 128, 0.3)',
-                        ))
+                        doc.stag('hr', style=s.get('hr'))
         st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
