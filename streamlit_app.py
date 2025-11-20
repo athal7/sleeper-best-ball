@@ -15,14 +15,11 @@ class Style():
     def __init__(self, styles: dict):
         self.styles = styles
 
-    def get(self, label: str) -> str:
-        return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in self.styles.get(label, {}).items())
-
-    def set(self, label: str, **kwargs) -> 'Style':
-        if label not in self.styles:
-            self.styles[label] = {}
-        self.styles[label].update(kwargs)
-        return self
+    def get(self, label: str, **extra) -> str:
+        styles = self.styles.get(label, {}).copy()
+        if extra:
+            styles.update(extra)
+        return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in styles.items())
 
 
 @dataclass
@@ -365,7 +362,7 @@ class Matchup:
         s = Style({
             'table': {'width': '100%', 'max-width': '600px', 'table-layout': 'fixed'},
             'avatar': {'width': '35px', 'height': '35px', 'border-radius': '20px'},
-            'name': {'line-height': '1.2em', },
+            'name': {'line-height': '1.2em'},
             'info': {'font-size': '0.8em', 'line-height': '0.8em', 'opacity': '0.8'},
             'points': {'line-height': '1.2em', 'text-align': 'right'},
             'projection': {'font-size': '0.8em', 'text-align': 'right', 'line-height': '0.8em', 'opacity': '0.8'},
@@ -405,21 +402,26 @@ class Matchup:
             self.render_players(self.positions, s)
 
     def render_players(self, positions: pd.DataFrame, s: Style):
-        s.set('table', font_size="0.9em")
         doc, tag, text, line = Doc().ttl()
-        with tag('table', style=s.get('table')):
+        with tag('table', style=s.get('table', font_size="0.9em")):
             with tag('tbody'):
                 for pos, row in positions.iterrows():
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
-                        line('td', p1.name, colspan=2,
-                             style=f"{s.get('name')} {'font-weight: bold;' if p1.is_live else ''}")
+                        if p1.is_live:
+                            line('td', p1.name, style=s.get(
+                                'name', font_weight='bold'), colspan=2)
+                        else:
+                            line('td', p1.name, colspan=2, style=s.get('name'))
                         line('td', p1.get_points(), style=s.get('points'))
                         line('td', row['position'],
                              rowspan=3, style=s.get('label'))
-                        line('td', p2.name, colspan=2,
-                             style=f"{s.get('name')} {'font-weight: bold;' if p2.is_live else ''}")
+                        if p2.is_live:
+                            line('td', p2.name, colspan=2, style=s.get(
+                                'name', font_weight='bold'))
+                        else:
+                            line('td', p2.name, colspan=2, style=s.get('name'))
                         line('td', p2.get_points(), style=s.get('points'))
                     with tag('tr'):
                         line('td', p1.player_info,
