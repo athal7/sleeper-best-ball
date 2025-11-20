@@ -15,6 +15,12 @@ class Style():
     def __init__(self, styles: dict):
         self.styles = styles
 
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            return self.get(name)
+
     def get(self, label: str, **extra) -> str:
         styles = self.styles.get(label, {}).copy()
         if extra:
@@ -202,7 +208,7 @@ class Player:
     def name(self) -> str:
         return f"{self.first_name[0]}. {self.last_name}"
 
-    def get_game_status(self) -> str:
+    def get_status(self) -> str:
         if self.bye:
             return "Bye"
         else:
@@ -363,6 +369,7 @@ class Matchup:
             'table': {'width': '100%', 'max-width': '600px', 'table-layout': 'fixed'},
             'avatar': {'width': '35px', 'height': '35px', 'border-radius': '20px'},
             'name': {'line-height': '1.2em'},
+            'live': {'font-weight': 'bold'},
             'info': {'font-size': '0.8em', 'line-height': '0.8em', 'opacity': '0.8'},
             'points': {'line-height': '1.2em', 'text-align': 'right'},
             'projection': {'font-size': '0.8em', 'text-align': 'right', 'line-height': '0.8em', 'opacity': '0.8'},
@@ -370,32 +377,28 @@ class Matchup:
             'status': {'font-size': '0.8em', 'font-style': 'italic', 'line-height': '1em', 'opacity': '0.6'},
             'hr': {'border': 'none', 'border-top': '1px solid rgba(128, 128, 128, 0.3)'},
         })
-        with tag('table', style=s.get('table')):
+        with tag('table', style=s.table):
             with tag('tbody'):
                 with tag('tr'):
                     with tag('td', colspan=2, rowspan=2):
-                        doc.stag('img', src=t1.avatar_url,
-                                 alt='Avatar', style=s.get('avatar'))
-                    line('td', t1.points, style=s.get('points'))
-                    line('td', "vs", rowspan="5", style=s.get('label'))
+                        doc.stag('img', src=t1.avatar_url, style=s.avatar)
+                    line('td', t1.points, style=s.points)
+                    line('td', "vs", rowspan="5", style=s.label)
                     with tag('td', colspan=2, rowspan=2):
-                        doc.stag('img', src=t2.avatar_url,
-                                 alt='Avatar', style=s.get('avatar'))
-                    line('td', t2.points, style=s.get('points'))
+                        doc.stag('img', src=t2.avatar_url, style=s.avatar)
+                    line('td', t2.points, style=s.points)
                 with tag('tr'):
-                    line('td', t1.projection, style=s.get('projection'))
-                    line('td', t2.projection, style=s.get('projection'))
+                    line('td', t1.projection, style=s.projection)
+                    line('td', t2.projection, style=s.projection)
                 with tag('tr'):
-                    line('td', t1.name, colspan=3, style=s.get('name'))
-                    line('td', t2.name, colspan=3, style=s.get('name'))
+                    line('td', t1.name, colspan=3, style=s.name)
+                    line('td', t2.name, colspan=3, style=s.name)
                 with tag('tr'):
-                    line('td', t1.team_info, colspan=3, style=s.get('info'))
-                    line('td', t2.team_info, colspan=3, style=s.get('info'))
+                    line('td', t1.team_info, colspan=3, style=s.info)
+                    line('td', t2.team_info, colspan=3, style=s.info)
                 with tag('tr'):
-                    line('td', t1.played_counts,
-                         colspan=3, style=s.get('status'))
-                    line('td', t2.played_counts,
-                         colspan=3, style=s.get('status'))
+                    line('td', t1.played_counts, colspan=3, style=s.status)
+                    line('td', t2.played_counts, colspan=3, style=s.status)
 
         st.html(doc.getvalue())
         with st.expander("Show players"):
@@ -409,36 +412,31 @@ class Matchup:
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
-                        if p1.is_live:
-                            line('td', p1.name, style=s.get(
-                                'name', font_weight='bold'), colspan=2)
-                        else:
-                            line('td', p1.name, colspan=2, style=s.get('name'))
-                        line('td', p1.get_points(), style=s.get('points'))
-                        line('td', row['position'],
-                             rowspan=3, style=s.get('label'))
-                        if p2.is_live:
-                            line('td', p2.name, colspan=2, style=s.get(
-                                'name', font_weight='bold'))
-                        else:
-                            line('td', p2.name, colspan=2, style=s.get('name'))
-                        line('td', p2.get_points(), style=s.get('points'))
+                        line(
+                            'td',
+                            p1.name,
+                            style=f"{s.name} {s.live if p1.is_live else ''}",
+                            colspan=2
+                        )
+                        line('td', p1.get_points(), style=s.points)
+                        line('td', row['position'], rowspan=3, style=s.label)
+                        line(
+                            'td',
+                            p2.name,
+                            style=f"{s.name} {s.live if p2.is_live else ''}",
+                            colspan=2
+                        )
+                        line('td', p2.get_points(), style=s.points)
                     with tag('tr'):
-                        line('td', p1.player_info,
-                             colspan=2, style=s.get('info'))
-                        line('td', p1.get_projection(),
-                             style=s.get('projection'))
-                        line('td', p2.player_info,
-                             colspan=2, style=s.get('info'))
-                        line('td', p2.get_projection(),
-                             style=s.get('projection'))
+                        line('td', p1.player_info, colspan=2, style=s.info)
+                        line('td', p1.get_projection(), style=s.projection)
+                        line('td', p2.player_info, colspan=2, style=s.info)
+                        line('td', p2.get_projection(), style=s.projection)
                     with tag('tr'):
-                        line('td', p1.get_game_status(),
-                             colspan=3, style=s.get('status'))
-                        line('td', p2.get_game_status(),
-                             colspan=3, style=s.get('status'))
-                    with tag('td', colspan="7", klass='label'):
-                        doc.stag('hr', style=s.get('hr'))
+                        line('td', p1.get_status(), colspan=3, style=s.status)
+                        line('td', p2.get_status(), colspan=3, style=s.status)
+                    with tag('td', colspan=7):
+                        doc.stag('hr', style=s.hr)
         st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
