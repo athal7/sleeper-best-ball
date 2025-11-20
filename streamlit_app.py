@@ -385,9 +385,7 @@ class Matchup:
 
         st.html(doc.getvalue())
         with st.expander("Show players"):
-            self.render_players(self.positions.starting)
-            with st.expander("Show bench"):
-                self.render_players(self.positions.bench)
+            self.render_players(self.positions)
 
     def render_players(self, positions: pd.DataFrame):
         s = {
