@@ -175,15 +175,6 @@ class Positions(pd.DataFrame):
         df.set_index('spos', inplace=True)
         super().__init__(df[['position', 'eligible']])
 
-    @property
-    def starting(self) -> pd.DataFrame:
-        return self[~self.index.str.startswith('BN')]
-
-    @property
-    def bench(self) -> pd.DataFrame:
-        return self[self.index.str.startswith('BN')]
-
-
 @dataclass
 class Player:
     first_name: str = field(default_factory=str)
@@ -226,10 +217,6 @@ class Player:
     @property
     def is_final(self) -> bool:
         return self.pct_played == 1
-
-    @property
-    def is_out(self) -> bool:
-        return self.injury_status in ['IR', 'Out'] and self.points == 0 and self.projection == 0
 
     def get_points(self) -> str:
         return "-" if self.points == 0 else f"{self.points:.2f}"
