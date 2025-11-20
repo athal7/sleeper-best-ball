@@ -198,7 +198,12 @@ class Player:
         if self.bye:
             return "Bye"
         else:
-            return f"{self.game_status} {self.score}-{self.opponent_score} {'vs' if self.home else '@'} {self.opponent}"
+            status = self.game_status
+            if self.pct_played > 0:
+                status += f" {self.score}-{self.opponent_score}"
+            status += ' vs ' if self.home else ' @ '
+            status += self.opponent
+            return status
 
     @property
     def is_live(self) -> bool:
