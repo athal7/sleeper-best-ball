@@ -80,9 +80,9 @@ class Data:
             'status.type.shortDetail': 'game_status',
             'status.period': 'quarter',
             'status.clock': 'clock',
-            'competitors.homeAway': 'home',
             'id': 'game_id'
         }, inplace=True)
+        df['home'] = df['competitors.homeAway'] == 'home'
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
         df = df[['team', 'score', 'quarter', 'clock',
                  'game_status', 'home', 'game_id']]
