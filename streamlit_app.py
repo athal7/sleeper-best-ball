@@ -201,7 +201,7 @@ class Player:
             status = self.game_status
             if self.pct_played > 0:
                 status += f" {self.score}-{self.opponent_score}"
-            status += ' vs ' if self.home else ' @ '
+            status += f"{' vs ' if self.home else ' @ '}"
             status += self.opponent
             return status
 
