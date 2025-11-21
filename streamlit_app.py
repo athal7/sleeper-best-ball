@@ -25,7 +25,7 @@ class Style():
         styles = self.styles.get(label, {}).copy()
         if extra:
             styles.update(extra)
-        return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in styles.items())
+        return '; '.join(f'{k.replace("_", "-")}: {v}' for k, v in styles.items()) + ';'
 
 
 @dataclass
@@ -395,7 +395,14 @@ class Matchup:
         doc, tag, text, line = Doc().ttl()
         with tag('table', style=s.get('table', font_size="0.9em")):
             with tag('tbody'):
-                for pos, row in positions.iterrows():
+                for idx, (pos, row) in enumerate(positions.iterrows()):
+                    if idx > 0:
+                        with tag('tr'):
+                            with tag('td', colspan=7):
+                                doc.stag(
+                                    'hr', 
+                                    style=f"{s.hr} {'border-width:10px' if pos == 'BN1' else ''}"
+                                )
                     p1 = self.team1.roster.at_position(pos)
                     p2 = self.team2.roster.at_position(pos)
                     with tag('tr'):
@@ -422,8 +429,7 @@ class Matchup:
                     with tag('tr'):
                         line('td', p1.get_status(), colspan=3, style=s.status)
                         line('td', p2.get_status(), colspan=3, style=s.status)
-                    with tag('td', colspan=7):
-                        doc.stag('hr', style=s.hr)
+
         st.html(doc.getvalue())
 
     def contains_user(self, username: str) -> bool:
