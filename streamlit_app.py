@@ -331,7 +331,7 @@ class FantasyTeam:
 
     @property
     def projection(self) -> str:
-        return f"{self.roster.projected_starters.projection.sum():.2f}"
+        return f"{self.roster.projected_starters.optimistic.sum():.2f}"
 
     @property
     def team_info(self) -> str:
