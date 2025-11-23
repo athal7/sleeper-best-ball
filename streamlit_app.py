@@ -541,13 +541,17 @@ class Context:
 def main():
     context = Context()
     if not context.leagues:
-        st.html("""
-            <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
-            <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
-            <meta name="apple-mobile-web-app-capable" content="yes">
-            <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-            <style> h1 { font-size: 2rem !important; }</style>
-        """)
+        st.html("""<style>
+            html, body { background-color: #ffffff; }
+            @media (prefers-color-scheme: dark) {
+                html, body { background-color: #000000 !important; }
+                body {
+                    margin-top: env(safe-area-inset-top);
+                    margin-bottom: env(safe-area-inset-bottom);
+                }
+            }
+            h1 { font-size: 2rem !important; }
+        </style>""")
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
         st.text_input("Enter your Sleeper username:", key='username_input',
