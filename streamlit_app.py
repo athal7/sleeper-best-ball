@@ -355,7 +355,7 @@ class Matchup:
         s = Style({
             'table': {'width': '100%', 'max-width': '600px', 'table-layout': 'fixed'},
             'avatar': {'width': '35px', 'height': '35px', 'border-radius': '20px'},
-            'name': {'line-height': '1.2em'},
+            'name': {'line-height': '1.2em', 'text-overflow': 'ellipsis', 'overflow': 'hidden', 'white-space': 'nowrap'},
             'live': {'font-weight': 'bold'},
             'info': {'font-size': '0.8em', 'line-height': '0.8em', 'opacity': '0.8'},
             'points': {'line-height': '1.2em', 'text-align': 'right'},
