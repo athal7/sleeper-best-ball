@@ -1,5 +1,6 @@
 from streamlit_app import Player
 from dataclasses import asdict
+import pandas as pd
 import pytest
 
 default = Player(
@@ -12,7 +13,8 @@ default = Player(
     projection=15.5,
     optimistic=20.0,
     pct_played=0.0,
-    game_status='Sunday 1:00 PM',
+    game_status='9/08 1:00 PM ET',
+    game_time='2024-09-08 13:00:00+00:00',
     home=False,
     score=0,
     opponent_score=0,
@@ -32,8 +34,8 @@ def test_name():
 
 
 @pytest.mark.parametrize("player, expected", [
-    (player(), f"Sunday 1:00 PM @ NYG"),
-    (player(home=True), f"Sunday 1:00 PM vs NYG"),
+    (player(), f"Sun 1:00 PM @ NYG"),
+    (player(home=True), f"Sun 1:00 PM vs NYG"),
     (player(bye=True), "Bye"),
     (player(game_status='5:00 4th Q', pct_played=50,
      score=14, opponent_score=7), f"5:00 4th Q 14-7 @ NYG"),

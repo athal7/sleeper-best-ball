@@ -86,7 +86,7 @@ class Data:
         df = pd.json_normalize(competitions)
         df = df.explode('competitors')
         df = df[['id', 'competitors', 'status.period',
-                 'status.clock', 'status.type.shortDetail']]
+                 'status.clock', 'status.type.shortDetail', 'time.value']]
         df = pd.json_normalize(df.to_dict(orient='records'))
         df.rename(columns={
             'competitors.team.abbreviation': 'team',
@@ -94,18 +94,19 @@ class Data:
             'status.type.shortDetail': 'game_status',
             'status.period': 'quarter',
             'status.clock': 'clock',
+            'time.value': 'game_time',
             'id': 'game_id'
         }, inplace=True)
         df['home'] = df['competitors.homeAway'] == 'home'
         df['team'] = df['team'].replace(Data.TEAM_MAPPINGS)
         df = df[['team', 'score', 'quarter', 'clock',
-                 'game_status', 'home', 'game_id']]
+                 'game_status', 'home', 'game_id', 'game_time']]
         df = df.merge(df, on='game_id', suffixes=(
             '', '_opponent')).query('team != team_opponent')
         df.set_index('team', inplace=True)
         df.rename(columns={'team_opponent': 'opponent',
                   'score_opponent': 'opponent_score'}, inplace=True)
-        return df[['quarter', 'clock', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
+        return df[['quarter', 'clock', 'game_status', 'home', 'opponent', 'score', 'opponent_score', 'game_time']]
 
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
@@ -189,9 +190,10 @@ class Player:
     spos: str = field(default_factory=str)
     current_position: str = field(default_factory=str)
     injury_status: str = field(default_factory=str)
-    game_status: str = field(default_factory=str)
-    home: bool = field(default_factory=bool)
-    opponent: str = field(default_factory=str)
+    game_status: Optional[str] = field(default=None)
+    home: Optional[bool] = field(default=None)
+    opponent: Optional[str] = field(default=None)
+    game_time: Optional[str] = field(default=None)
     score: Optional[int] = field(default=None)
     opponent_score: Optional[int] = field(default=None)
 
@@ -200,15 +202,14 @@ class Player:
         return f"{self.first_name[0]}. {self.last_name}"
 
     def get_status(self) -> str:
+        vs = "vs" if self.home else "@"
         if self.bye:
             return "Bye"
+        elif self.pct_played == 0 and self.game_time:
+            game_time = pd.to_datetime(self.game_time).tz_convert(st.context.timezone).strftime('%a %-I:%M %p')
+            return f"{game_time} {vs} {self.opponent}"
         else:
-            status = self.game_status
-            if self.pct_played > 0:
-                status += f" {self.score}-{self.opponent_score}"
-            status += f"{' vs ' if self.home else ' @ '}"
-            status += self.opponent
-            return status
+            return f"{self.game_status} {self.score}-{self.opponent_score} {vs} {self.opponent}"
 
     @property
     def is_live(self) -> bool:
@@ -476,7 +477,7 @@ class League:
             self._calc_points_from_stats(self.data.projections, self.data.scoring), axis=1)
         df['optimistic'] = df['points'] + \
             (1 - df['pct_played']) * df['projection']
-        return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status', 'home', 'opponent', 'score', 'opponent_score']]
+        return df[['first_name', 'last_name', 'team', 'position', 'pct_played', 'points', 'projection', 'optimistic', 'bye', 'injury_status', 'game_status', 'home', 'opponent', 'score', 'opponent_score', 'game_time']]
 
     def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups

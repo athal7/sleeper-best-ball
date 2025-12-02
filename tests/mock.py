@@ -25,7 +25,8 @@ def game_status(**kwargs) -> dict:
         'home': True,
         'opponent': 'XYZ',
         'score': None,
-        'opponent_score': None
+        'opponent_score': None,
+        'game_time': '2024-09-01T13:00:00Z'
     }
     m.update(kwargs)
     return m
