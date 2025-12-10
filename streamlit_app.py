@@ -49,8 +49,7 @@ class Data:
             self.game_statuses = self.get_game_statuses(
                 context.season, context.week)
         if self.matchups is None:
-            self.matchups = self.get_matchups(
-                league_id, context.week)
+            self.matchups = self.get_matchups(league_id, context.week)
         if self.rosters is None:
             self.rosters = self.get_rosters(league_id)
         if self.players is None:
@@ -111,8 +110,29 @@ class Data:
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
     def get_matchups(league_id: int, week: int) -> pd.DataFrame:
-        league_id = sleeper.League(league_id)
-        return pd.DataFrame(league_id.get_matchups(week))
+        league = sleeper.League(league_id)
+        last_regular_week = league.get_league()['settings']['playoff_week_start'] - 1
+        df = pd.DataFrame(league.get_matchups(week))
+        if week > last_regular_week:
+            df = df.drop(columns=['matchup_id'])
+            
+            round = week - last_regular_week
+            matchups = []
+            matchup_id = 1
+            for r in league.get_playoff_winners_bracket():
+                if r['r'] == week - last_regular_week:
+                    matchups.append({'matchup_id': matchup_id, 'roster_id': r['t1']})
+                    matchups.append({'matchup_id': matchup_id, 'roster_id': r['t2']})
+                    matchup_id += 1
+            for r in league.get_playoff_losers_bracket():
+                if r['r'] == week - last_regular_week:
+                    matchups.append({'matchup_id': matchup_id, 'roster_id': r['t1']})
+                    matchups.append({'matchup_id': matchup_id, 'roster_id': r['t2']})
+                    matchup_id += 1
+            
+            playoff_df = pd.DataFrame(matchups).set_index('roster_id')
+            df = df.join(playoff_df, on='roster_id', how='inner').reset_index()
+        return df
 
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
@@ -176,6 +196,7 @@ class Positions(pd.DataFrame):
         df.set_index('spos', inplace=True)
         super().__init__(df[['position', 'eligible']])
 
+
 @dataclass
 class Player:
     first_name: str = field(default_factory=str)
@@ -199,14 +220,17 @@ class Player:
 
     @property
     def name(self) -> str:
-        return f"{self.first_name[0]}. {self.last_name}"
+        if self.first_name and self.last_name:
+            return f"{self.first_name[0]}. {self.last_name}"
+        return "N/A"
 
     def get_status(self) -> str:
         vs = "vs" if self.home else "@"
         if self.bye:
             return "Bye"
         elif self.pct_played == 0 and self.game_time:
-            game_time = pd.to_datetime(self.game_time).tz_convert(st.context.timezone).strftime('%a %-I:%M %p')
+            game_time = pd.to_datetime(self.game_time).tz_convert(
+                st.context.timezone).strftime('%a %-I:%M %p')
             return f"{game_time} {vs} {self.opponent}"
         else:
             return f"{self.game_status} {self.score}-{self.opponent_score} {vs} {self.opponent}"
@@ -401,7 +425,7 @@ class Matchup:
                         with tag('tr'):
                             with tag('td', colspan=7):
                                 doc.stag(
-                                    'hr', 
+                                    'hr',
                                     style=f"{s.hr} {'border-width:10px' if pos == 'BN1' else ''}"
                                 )
                     p1 = self.team1.roster.at_position(pos)
@@ -460,6 +484,10 @@ class League:
     @property
     def name(self) -> str:
         return self.data.league.get_league_name()
+    
+    @property
+    def playoff_week_start(self) -> int:
+        return self.data.league.get_league()['settings']['playoff_week_start']
 
     def players(self) -> pd.DataFrame:
         df = self.data.players.copy(
