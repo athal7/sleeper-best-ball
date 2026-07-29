@@ -113,6 +113,8 @@ class Data:
         league = sleeper.League(league_id)
         last_regular_week = league.get_league()['settings']['playoff_week_start'] - 1
         df = pd.DataFrame(league.get_matchups(week))
+        if df.empty:
+            return df
         if week > last_regular_week:
             df = df.drop(columns=['matchup_id'])
             
@@ -146,7 +148,12 @@ class Data:
         df['rank'] = range(1, len(df) + 1)
         df = df[['owner_id', 'players', 'record', 'rank']]
 
-        users = pd.json_normalize(league.get_users()).set_index('user_id')
+        users = pd.json_normalize(league.get_users())
+        if not users.empty and 'user_id' in users.columns:
+            users.set_index('user_id', inplace=True)
+        for col in ['display_name', 'avatar', 'metadata.team_name']:
+            if col not in users.columns:
+                users[col] = None
         users = users[['display_name', 'avatar', 'metadata.team_name']]
 
         df = df.merge(users, left_on='owner_id', right_index=True, how='left')
@@ -509,6 +516,8 @@ class League:
 
     def matchups(self, context) -> list[Matchup]:
         df = self.data.matchups
+        if df.empty or 'roster_id' not in df.columns:
+            return []
         df = df.join(self.data.rosters, on='roster_id', how='left')
 
         all_players = self.players()
@@ -559,8 +568,9 @@ class Context:
         current = sleeper.get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
+        display_week = int(current['display_week'])
         self.week = st.session_state.get(
-            'week') or int(current['display_week'])
+            'week') or (display_week if display_week > 0 else 1)
         self.leagues = []
         for league_id in self._leagues(self.season, st.query_params.to_dict()):
             data = Data(league_id=league_id, context=self)
@@ -586,10 +596,12 @@ def main():
         st.text_input("Enter your Sleeper username:", key='username_input',
                       on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=context.username)
 
-    for league in context.leagues:
-        st.markdown(f"## {league.name}")
+    if context.leagues:
         st.number_input("Week", min_value=1, max_value=18,
                         key='week', value=context.week)
+
+    for league in context.leagues:
+        st.markdown(f"## {league.name}")
         for matchup in league.matchups(context):
             matchup.render()
         st.markdown(f"(League ID: {league.id})")
