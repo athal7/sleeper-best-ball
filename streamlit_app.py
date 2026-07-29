@@ -151,6 +151,10 @@ class Data:
         users = pd.json_normalize(league.get_users())
         if not users.empty and 'user_id' in users.columns:
             users.set_index('user_id', inplace=True)
+        else:
+            # Create empty DataFrame with properly named index for merge compatibility
+            users = pd.DataFrame(columns=['display_name', 'avatar', 'metadata.team_name'])
+            users.index.name = 'user_id'
         for col in ['display_name', 'avatar', 'metadata.team_name']:
             if col not in users.columns:
                 users[col] = None
