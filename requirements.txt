@@ -1,4 +1,4 @@
-streamlit==1.60.0
+streamlit==1.61.1
 git+https://github.com/dtsong/sleeper-api-wrapper.git
 pandas
 requests
