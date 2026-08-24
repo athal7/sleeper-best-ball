@@ -1,4 +1,5 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
 import requests
 from dataclasses import InitVar, dataclass, field
@@ -9,6 +10,7 @@ import sleeper_wrapper as sleeper
 
 METADATA_TTL = 60 * 60  # 1 hour
 STATS_TTL = 60 * 5      # 5 minutes
+DRAFT_TTL = 60          # 60 seconds - live draft pick polling
 
 
 class Style():
@@ -206,6 +208,32 @@ class Positions(pd.DataFrame):
         df['spos'] = df['position'] + (counts + 1).astype(str)
         df.set_index('spos', inplace=True)
         super().__init__(df[['position', 'eligible']])
+
+
+SLOT_ELIGIBILITY = {slot: eligible for slot, _, eligible in Positions.MAPPINGS}
+
+
+@dataclass
+class DraftSettings:
+    teams: int
+    slots: dict[str, int]  # e.g. {'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1}
+
+    SLOT_KEY_MAP = {
+        'slots_qb': 'QB', 'slots_rb': 'RB', 'slots_wr': 'WR', 'slots_te': 'TE',
+        'slots_flex': 'FLEX', 'slots_super_flex': 'SUPER_FLEX',
+        'slots_k': 'K', 'slots_def': 'DEF',
+    }
+
+    @classmethod
+    def from_draft(cls, draft: dict) -> 'DraftSettings':
+        settings = draft['settings']
+        slots = {label: settings[key] for key, label in cls.SLOT_KEY_MAP.items()
+                  if settings.get(key, 0) > 0}
+        return cls(teams=settings['teams'], slots=slots)
+
+    @property
+    def relevant_positions(self) -> set[str]:
+        return {p for slot in self.slots for p in SLOT_ELIGIBILITY[slot]}
 
 
 @dataclass
@@ -545,6 +573,251 @@ class League:
         return grouped
 
 
+SEASON_WEEKS = range(1, 19)  # NFL regular season: weeks 1-18
+Z_90TH_PERCENTILE = 1.2816   # standard-normal z-score for the 90th percentile
+
+# Fallback scoring when a draft has no linked league (e.g. a standalone mock
+# draft) and therefore no custom scoring_settings to read - a standard PPR
+# baseline using the same stat field names Sleeper's projections use.
+DEFAULT_SCORING = {
+    'pass_yd': 0.04, 'pass_td': 4, 'pass_int': -2,
+    'rush_yd': 0.1, 'rush_td': 6,
+    'rec': 1, 'rec_yd': 0.1, 'rec_td': 6,
+    'fum_lost': -2,
+}
+
+
+@st.cache_data(ttl=METADATA_TTL)
+def fetch_draft_scoring(league_id: Optional[str]) -> dict:
+    """Real league scoring (so TE-premium bonuses like bonus_rec_te are honored)
+    when the draft is linked to one, else a standard PPR fallback."""
+    if league_id and league_id != '0':
+        return sleeper.League(league_id).get_league()['scoring_settings']
+    return DEFAULT_SCORING
+
+
+def _infer_bye_week(weekly_row: pd.Series) -> Optional[int]:
+    """A player missing from exactly one week's projections is on bye that
+    week; missing from zero or several weeks is ambiguous (e.g. new addition
+    mid-season, or a still-incomplete slate) so is left unknown."""
+    missing = weekly_row[weekly_row.isna()].index.tolist()
+    return missing[0] if len(missing) == 1 else None
+
+
+def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
+    """Builds season-long mean/ceiling projections entirely from Sleeper's own
+    weekly projections (no external data needed): mean_pts is the projected
+    season total, ceiling_90 is the 90th-percentile week from that player's
+    own week-to-week projected spread (spike-week potential), bye_week is
+    inferred from the one week they're absent from the projections. All
+    computed under the given scoring so TE-premium bonuses are reflected.
+    Weeks a player has no projection (e.g. bye) are excluded from mean/ceiling,
+    not treated as a zero.
+    """
+    weekly_points = {}
+    for week in SEASON_WEEKS:
+        stats = Data.get_projections(season, week)
+        if stats.empty:
+            continue
+        compute = League._calc_points_from_stats(stats, scoring)
+        # Transpose so .apply(axis=1) iterates real per-player rows (row.name =
+        # player_id) - applying to a zero-column frame leaves row.name unset.
+        weekly_points[week] = stats.T.apply(compute, axis=1)
+    weekly = pd.DataFrame(weekly_points)
+    mean_pts = weekly.sum(axis=1, skipna=True)
+    ceiling_90 = (weekly.mean(axis=1, skipna=True) +
+                  Z_90TH_PERCENTILE * weekly.std(axis=1, skipna=True).fillna(0.0))
+    bye_week = weekly.apply(_infer_bye_week, axis=1)
+    return pd.DataFrame({'mean_pts': mean_pts, 'ceiling_90': ceiling_90, 'bye_week': bye_week})
+
+
+@st.cache_data(ttl=METADATA_TTL)
+def get_user_drafts(username: str, season: int) -> tuple[str, list]:
+    """Returns (user_id, drafts) for the given Sleeper username and season."""
+    user = sleeper.User(username)
+    return user.get_user_id(), user.get_all_drafts('nfl', season)
+
+
+def build_player_pool(projections: pd.DataFrame, settings: DraftSettings, picks: list[dict]) -> pd.DataFrame:
+    """Merges auto-fetched season projections with Sleeper player metadata (name/team/position,
+    reusing Data.get_players()), restricts to positions this draft actually starts
+    (settings.relevant_positions), and flags drafted players from the live picks feed.
+    """
+    players = Data.get_players()[['position', 'first_name', 'last_name', 'team']]
+    pool = projections.join(players, how='inner')
+    pool = pool[pool['position'].isin(settings.relevant_positions)]
+    drafted_ids = {p['player_id'] for p in picks}
+    pool = pool.assign(drafted=pool.index.isin(drafted_ids))
+    return pool
+
+
+class PositionDemand(pd.DataFrame):
+    CLIFF_SEARCH_MIN_RANK = 5     # ignore the very top studs - too small a group to call a "cliff"
+    CLIFF_SEARCH_MAX_RANK = 60    # cap search depth - irrelevant this deep regardless of format
+    FLEX_BONUS_PER_SLOT = 0.15    # each shared FLEX/SUPER_FLEX slot type this position is
+                                    # eligible for extends its viable tier a bit - it has extra
+                                    # paths to relevance beyond its own dedicated need
+    CLIFF_THRESHOLD = 2.0
+
+    def __init__(self, pool: pd.DataFrame, settings: DraftSettings):
+        rows = {}
+        for pos in settings.relevant_positions:
+            # Exclude true non-contributors (never expected to see the field) - without
+            # this, the long tail of zero-production players swamps any distribution
+            # statistic computed over "everyone at this position".
+            own = pool[(pool['position'] == pos) & (pool['mean_pts'] > 0)] \
+                .sort_values('mean_pts', ascending=False)
+            base_total = self._find_replacement_rank(own['mean_pts'].to_numpy())
+            shared_slots = sum(
+                1 for slot in ('FLEX', 'SUPER_FLEX')
+                if slot in settings.slots and pos in SLOT_ELIGIBILITY[slot]
+            )
+            total = round(base_total * (1 + self.FLEX_BONUS_PER_SLOT * shared_slots))
+            viable = own.iloc[:total]
+            undrafted_viable = viable[~viable['drafted']]
+            remaining = len(undrafted_viable)
+            replacement_ceiling = (
+                undrafted_viable.sort_values('mean_pts')['ceiling_90'].iloc[0]
+                if remaining else 0.0
+            )
+            scarcity = total / remaining if remaining else float('inf')
+            rows[pos] = {
+                'total_viable': total,
+                'remaining_viable': remaining,
+                'replacement_ceiling': replacement_ceiling,
+                'scarcity_multiplier': scarcity,
+                'is_cliff': scarcity > self.CLIFF_THRESHOLD,
+            }
+        super().__init__(pd.DataFrame.from_dict(rows, orient='index'))
+
+    @classmethod
+    def _find_replacement_rank(cls, sorted_desc_values: np.ndarray) -> int:
+        """Where this position's own projected-value curve drops off hardest,
+        in relative (percentage) terms - scale-invariant, so it works whether
+        the position's raw point totals run high (QB) or low (TE). Purely a
+        function of this position's own values; no roster-slot or team-count
+        input at all.
+        """
+        n = len(sorted_desc_values)
+        hi = min(cls.CLIFF_SEARCH_MAX_RANK, n - 1)
+        if n < 2 or hi <= cls.CLIFF_SEARCH_MIN_RANK:
+            return n
+        drops = (sorted_desc_values[:-1] - sorted_desc_values[1:]) / sorted_desc_values[:-1]
+        idx = cls.CLIFF_SEARCH_MIN_RANK + int(np.argmax(drops[cls.CLIFF_SEARCH_MIN_RANK:hi]))
+        return idx + 1
+
+
+def compute_bb_vorp(pool: pd.DataFrame, demand: PositionDemand) -> pd.Series:
+    """BB-VORP = player's own ceiling_90 minus their position's replacement_ceiling.
+    Scarcity is already implicit here - a thin position's population-derived
+    replacement level sits low relative to its few remaining good players, which
+    widens this gap on its own. No separate scarcity multiplier is applied on top;
+    doing so would double-count the same signal replacement_ceiling already carries.
+    demand['is_cliff'] is exposed separately as an awareness flag, not a score input.
+    """
+    undrafted = pool[~pool['drafted']]
+    replacement = undrafted['position'].map(demand['replacement_ceiling'])
+    return undrafted['ceiling_90'] - replacement
+
+
+def effective_position_needs(settings: DraftSettings) -> dict[str, int]:
+    """Personal roster-construction target per position: dedicated slots, plus
+    one more for each shared FLEX/SUPER_FLEX slot type the position is
+    eligible for. A superflex league's SUPER_FLEX slot isn't "any position" in
+    practice - QB is usually the best play there - so QB's real personal
+    target is 2 (1 dedicated + 1 for SUPER_FLEX), not 1. Same idea for
+    RB/WR/TE against FLEX and SUPER_FLEX. Whole-player counts, since roster
+    construction is naturally "how many of this position should I own",
+    not a fractional share.
+    """
+    needs: dict[str, int] = {}
+    for slot, count in settings.slots.items():
+        if slot in ('FLEX', 'SUPER_FLEX'):
+            for pos in SLOT_ELIGIBILITY[slot]:
+                needs[pos] = needs.get(pos, 0) + count
+        else:
+            needs[slot] = needs.get(slot, 0) + count
+    return needs
+
+
+BYE_OVERLAP_DECAY = 0.15  # per already-owned same-position/same-bye player
+
+
+def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
+                            my_player_ids: set[str], settings: DraftSettings) -> pd.Series:
+    """Adjusts league-wide BB-VORP for the user's own roster construction:
+
+    - Need boost: +1.0x per still-unfilled slot toward effective_position_needs
+      (dedicated + FLEX/SUPER_FLEX-driven extras - e.g. in a superflex league,
+      still need 2 of 2 effective QB slots -> 3.0x, need 0 more -> 1.0x/no change).
+    - Bye-week discount: divides by (1 + BYE_OVERLAP_DECAY * n) where n is how
+      many of the user's own players at that position already share that bye
+      week - best ball lineups lose depth the week several similar players
+      are all out, so stacking is discouraged, never disqualified.
+
+    Positions/players are never penalized below the pure BB-VORP baseline for
+    already having "enough" - best ball drafts many bench players beyond the
+    minimum starters, and depth still has value.
+    """
+    my_roster = pool.loc[pool.index.isin(my_player_ids)]
+    my_position_counts = my_roster['position'].value_counts()
+    need_multiplier = {
+        pos: 1.0 + max(0, needed - my_position_counts.get(pos, 0))
+        for pos, needed in effective_position_needs(settings).items()
+    }
+    bye_counts = my_roster.groupby(['position', 'bye_week']).size()
+
+    undrafted = pool[~pool['drafted']]
+    need = undrafted['position'].map(need_multiplier).fillna(1.0)
+    overlap = undrafted.apply(
+        lambda row: bye_counts.get((row['position'], row['bye_week']), 0), axis=1)
+    bye_discount = 1.0 / (1 + BYE_OVERLAP_DECAY * overlap)
+
+    return bb_vorp.reindex(undrafted.index) * need * bye_discount
+
+
+def is_users_turn(draft: dict, picks_made: int, user_id: str) -> bool:
+    """True if user_id is on the clock for the next pick. Auction drafts have no
+    fixed turn order (nomination-based) so any user can always act."""
+    if draft.get('type') == 'auction':
+        return True
+    teams = draft['settings']['teams']
+    user_slot = (draft.get('draft_order') or {}).get(user_id)
+    if user_slot is None:
+        return False
+    pick_no = picks_made + 1
+    round_no = (pick_no - 1) // teams + 1
+    pos_in_round = (pick_no - 1) % teams + 1
+    if draft.get('type') == 'linear':
+        on_clock_slot = pos_in_round
+    else:  # snake (default draft type)
+        on_clock_slot = pos_in_round if round_no % 2 == 1 else teams - pos_in_round + 1
+    return on_clock_slot == user_slot
+
+
+@dataclass
+class DraftData:
+    draft_id: InitVar[str]
+    draft: dict = None
+    picks: list = None
+
+    def __post_init__(self, draft_id: str):
+        if self.draft is None:
+            self.draft = self.get_draft(draft_id)
+        if self.picks is None:
+            self.picks = self.get_picks(draft_id)
+
+    @staticmethod
+    @st.cache_data(ttl=METADATA_TTL)
+    def get_draft(draft_id: str) -> dict:
+        return sleeper.Drafts(draft_id).get_specific_draft()
+
+    @staticmethod
+    @st.cache_data(ttl=DRAFT_TTL)
+    def get_picks(draft_id: str) -> list:
+        return sleeper.Drafts(draft_id).get_all_picks()
+
+
 class Context:
     season: int
     week: int
@@ -572,16 +845,128 @@ class Context:
         current = sleeper.get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
+        is_regular_season = current['season_type'] == 'regular'
         display_week = int(current['display_week'])
         self.week = st.session_state.get(
-            'week') or (display_week if display_week > 0 else 1)
+            'week') or (display_week if is_regular_season and display_week > 0 else 1)
         self.leagues = []
         for league_id in self._leagues(self.season, st.query_params.to_dict()):
             data = Data(league_id=league_id, context=self)
             self.leagues.append(League(data=data))
 
 
+def render_my_roster(my_roster: pd.DataFrame, settings: DraftSettings):
+    st.subheader("Your Roster So Far")
+    if my_roster.empty:
+        st.caption("No picks yet.")
+        return
+    counts = my_roster['position'].value_counts()
+    needs = ", ".join(
+        f"{pos} {counts.get(pos, 0)}/{needed}"
+        for pos, needed in effective_position_needs(settings).items()
+    )
+    st.caption(f"Effective starter progress (incl. FLEX/SUPER_FLEX demand): {needs}")
+    display = my_roster.copy()
+    display['name'] = display['first_name'] + ' ' + display['last_name']
+    st.dataframe(
+        display[['name', 'position', 'team', 'bye_week']].sort_values('position'),
+        hide_index=True,
+    )
+
+
+def _highlight_cliff_row(row: pd.Series) -> list[str]:
+    return ['background-color: #ffcccc' if row['Cliff?'] else ''] * len(row)
+
+
+def render_recommendations(pool: pd.DataFrame, demand: PositionDemand):
+    st.subheader("Top 5 Recommendations")
+    top5 = pool[~pool['drafted']].nlargest(5, 'personal_score').copy()
+    top5['name'] = top5['first_name'] + ' ' + top5['last_name']
+    top5['Cliff?'] = top5['position'].map(demand['is_cliff']).fillna(False)
+    display = top5[['name', 'position', 'team', 'ceiling_90', 'bb_vorp', 'personal_score', 'Cliff?']]
+    styled = (display.style
+              .apply(_highlight_cliff_row, axis=1)
+              .format({
+                  'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}', 'personal_score': '{:.1f}',
+                  'Cliff?': lambda v: '\U0001f525 Cliff' if v else '',
+              }))
+    st.dataframe(styled, hide_index=True)
+
+
+@st.fragment(run_every=DRAFT_TTL)
+def _draft_assistant_fragment(draft_id: str, user_id: str):
+    data = DraftData(draft_id=draft_id)
+    settings = DraftSettings.from_draft(data.draft)
+    scoring = fetch_draft_scoring(data.draft.get('league_id'))
+    season = int(data.draft.get('season') or sleeper.get_sport_state('nfl')['league_season'])
+    projections = build_season_projections(season, scoring)
+    pool = build_player_pool(projections, settings, data.picks)
+    demand = PositionDemand(pool, settings)
+    pool = pool.assign(bb_vorp=compute_bb_vorp(pool, demand).reindex(pool.index))
+
+    my_player_ids = {p['player_id'] for p in data.picks if p.get('picked_by') == user_id}
+    personal_score = compute_personal_score(pool, pool['bb_vorp'], my_player_ids, settings)
+    pool = pool.assign(personal_score=personal_score.reindex(pool.index))
+
+    st.caption(f"Pick {len(data.picks) + 1} on the clock \u00b7 refreshes every {DRAFT_TTL}s")
+    if is_users_turn(data.draft, len(data.picks), user_id):
+        st.success("It's your turn!")
+    else:
+        st.caption("Not your turn yet \u2014 best available shown below anyway.")
+    render_my_roster(pool.loc[pool.index.isin(my_player_ids)], settings)
+    render_recommendations(pool, demand)
+
+
+def render_draft_assistant(username: str):
+    st.title("Draft Recommendation Engine \U0001f3af")
+    if not username:
+        st.info("Enter your Sleeper username in the sidebar to find your active drafts.")
+        return
+
+    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    try:
+        user_id, drafts = get_user_drafts(username, season)
+    except Exception:
+        st.error(f"Could not find Sleeper user '{username}'.")
+        return
+
+    active_drafts = [d for d in drafts if d.get('status') in ('drafting', 'pre_draft')]
+    if not active_drafts:
+        st.info("No active drafts found for this user this season.")
+        return
+
+    if len(active_drafts) == 1:
+        draft_id = active_drafts[0]['draft_id']
+        st.query_params['draft_id'] = draft_id
+    else:
+        labels = {d['draft_id']: d.get('metadata', {}).get('name') or d['draft_id']
+                  for d in active_drafts}
+        draft_ids = list(labels)
+        remembered = st.query_params.get('draft_id')
+        default_index = draft_ids.index(remembered) if remembered in draft_ids else 0
+        draft_id = st.sidebar.selectbox(
+            "Active draft", options=draft_ids, index=default_index, format_func=lambda k: labels[k],
+            key="draft_id_select",
+            on_change=lambda: st.query_params.update({'draft_id': st.session_state.draft_id_select}))
+
+    _draft_assistant_fragment(draft_id, user_id)
+
+
 def main():
+    username = st.sidebar.text_input(
+        "Sleeper username", key='username_input',
+        on_change=lambda: st.query_params.update({'username': st.session_state.username_input}),
+        value=st.query_params.get('username'))
+    mode_options = ["Live Scores", "Draft Assistant"]
+    remembered_mode = st.query_params.get('mode', mode_options[0])
+    mode_index = mode_options.index(remembered_mode) if remembered_mode in mode_options else 0
+    mode = st.sidebar.radio(
+        "View", mode_options, index=mode_index, key="app_mode",
+        on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode}))
+    if mode == "Draft Assistant":
+        render_draft_assistant(username)
+        return
+
     context = Context()
     if not context.leagues:
         st.html("""<style>
@@ -597,8 +982,6 @@ def main():
         </style>""")
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
-        st.text_input("Enter your Sleeper username:", key='username_input',
-                      on_change=lambda: st.query_params.update({'username': st.session_state.username_input}), value=context.username)
 
     if context.leagues:
         st.number_input("Week", min_value=1, max_value=18,
