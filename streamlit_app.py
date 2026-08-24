@@ -604,6 +604,7 @@ def _infer_bye_week(weekly_row: pd.Series) -> Optional[int]:
     return missing[0] if len(missing) == 1 else None
 
 
+@st.cache_data(ttl=METADATA_TTL)
 def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
     """Builds season-long mean/ceiling projections entirely from Sleeper's own
     weekly projections (no external data needed): mean_pts is the projected
@@ -649,6 +650,18 @@ def build_player_pool(projections: pd.DataFrame, settings: DraftSettings, picks:
     drafted_ids = {p['player_id'] for p in picks}
     pool = pool.assign(drafted=pool.index.isin(drafted_ids))
     return pool
+
+
+def build_my_roster(picks: list[dict], user_id: str, projections: pd.DataFrame) -> pd.DataFrame:
+    """All of the user's own picks, independent of build_player_pool's
+    relevant-position/has-projection filtering - a K/DEF pick, or one for a
+    player missing a Sleeper projection row, must still count toward roster
+    construction and appear in "Your Roster So Far".
+    """
+    my_player_ids = [p['player_id'] for p in picks if p.get('picked_by') == user_id]
+    roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(my_player_ids)
+    roster['bye_week'] = projections['bye_week'].reindex(my_player_ids)
+    return roster
 
 
 class PositionDemand(pd.DataFrame):
@@ -744,7 +757,7 @@ BYE_OVERLAP_DECAY = 0.15  # per already-owned same-position/same-bye player
 
 
 def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
-                            my_player_ids: set[str], settings: DraftSettings) -> pd.Series:
+                            my_roster: pd.DataFrame, settings: DraftSettings) -> pd.Series:
     """Adjusts league-wide BB-VORP for the user's own roster construction:
 
     - Need boost: +1.0x per still-unfilled slot toward effective_position_needs
@@ -757,9 +770,10 @@ def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
 
     Positions/players are never penalized below the pure BB-VORP baseline for
     already having "enough" - best ball drafts many bench players beyond the
-    minimum starters, and depth still has value.
+    minimum starters, and depth still has value. my_roster is the user's full
+    roster (see build_my_roster) - independent of the recommendation pool's
+    relevant-position/has-projection filtering.
     """
-    my_roster = pool.loc[pool.index.isin(my_player_ids)]
     my_position_counts = my_roster['position'].value_counts()
     need_multiplier = {
         pos: 1.0 + max(0, needed - my_position_counts.get(pos, 0))
@@ -769,8 +783,9 @@ def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
 
     undrafted = pool[~pool['drafted']]
     need = undrafted['position'].map(need_multiplier).fillna(1.0)
-    overlap = undrafted.apply(
-        lambda row: bye_counts.get((row['position'], row['bye_week']), 0), axis=1)
+    overlap_keys = pd.MultiIndex.from_arrays([undrafted['position'], undrafted['bye_week']])
+    overlap = pd.Series(
+        bye_counts.reindex(overlap_keys).fillna(0).to_numpy(), index=undrafted.index)
     bye_discount = 1.0 / (1 + BYE_OVERLAP_DECAY * overlap)
 
     return bb_vorp.reindex(undrafted.index) * need * bye_discount
@@ -904,8 +919,8 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     demand = PositionDemand(pool, settings)
     pool = pool.assign(bb_vorp=compute_bb_vorp(pool, demand).reindex(pool.index))
 
-    my_player_ids = {p['player_id'] for p in data.picks if p.get('picked_by') == user_id}
-    personal_score = compute_personal_score(pool, pool['bb_vorp'], my_player_ids, settings)
+    my_roster = build_my_roster(data.picks, user_id, projections)
+    personal_score = compute_personal_score(pool, pool['bb_vorp'], my_roster, settings)
     pool = pool.assign(personal_score=personal_score.reindex(pool.index))
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock \u00b7 refreshes every {DRAFT_TTL}s")
@@ -913,7 +928,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
         st.success("It's your turn!")
     else:
         st.caption("Not your turn yet \u2014 best available shown below anyway.")
-    render_my_roster(pool.loc[pool.index.isin(my_player_ids)], settings)
+    render_my_roster(my_roster, settings)
     render_recommendations(pool, demand)
 
 
@@ -926,8 +941,10 @@ def render_draft_assistant(username: str):
     season = int(sleeper.get_sport_state('nfl')['league_season'])
     try:
         user_id, drafts = get_user_drafts(username, season)
-    except Exception:
-        st.error(f"Could not find Sleeper user '{username}'.")
+    except Exception as exc:  # noqa: BLE001 - surface any Sleeper lookup failure
+        st.error(
+            f"Could not load drafts for Sleeper user '{username}'. "
+            f"Check the username, or retry if Sleeper is unavailable. ({exc})")
         return
 
     active_drafts = [d for d in drafts if d.get('status') in ('drafting', 'pre_draft')]

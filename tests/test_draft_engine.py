@@ -64,16 +64,6 @@ def test_find_replacement_rank_ignores_gaps_outside_search_window(monkeypatch):
     assert PositionDemand._find_replacement_rank(values) == 4
 
 
-def build_pool(rows: dict) -> pd.DataFrame:
-    return pd.DataFrame.from_dict(rows, orient='index')
-
-
-class FakeSettings:
-    def __init__(self, relevant_positions, slots=None):
-        self.relevant_positions = set(relevant_positions)
-        self.slots = slots or {}
-
-
 def test_position_demand_excludes_zero_production_players(monkeypatch):
     monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
     pool = build_pool({
@@ -325,8 +315,9 @@ def test_compute_personal_score_boosts_unmet_position_need():
         'wr1': {'position': 'WR', 'drafted': False, 'bye_week': 5},
     }, orient='index')
     bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
+    my_roster = pd.DataFrame(columns=['position', 'bye_week'])
 
-    score = compute_personal_score(pool, bb_vorp, my_player_ids=set(), settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
 
     # RB: need 2, have 0 -> 1.0 + 2 = 3.0x. WR: need 1, have 0 -> 1.0 + 1 = 2.0x.
     assert score['rb1'] == pytest.approx(30.0)
@@ -338,12 +329,13 @@ def test_compute_personal_score_superflex_boosts_second_qb_need():
     # not just the 1 dedicated slot. With 1 QB already owned, still 1 short.
     settings = DraftSettings(teams=12, slots={'QB': 1, 'SUPER_FLEX': 1})
     pool = pd.DataFrame.from_dict({
-        'qb_owned': {'position': 'QB', 'drafted': True, 'bye_week': 5},
         'qb2': {'position': 'QB', 'drafted': False, 'bye_week': 9},
     }, orient='index')
     bb_vorp = pd.Series({'qb2': 10.0})
+    my_roster = pd.DataFrame.from_dict(
+        {'qb_owned': {'position': 'QB', 'bye_week': 5}}, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_player_ids={'qb_owned'}, settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
 
     # Effective need = 1 (dedicated) + 1 (SUPER_FLEX) = 2; have 1 -> still 1.0x boost -> 2.0x total.
     assert score['qb2'] == pytest.approx(20.0)
@@ -361,16 +353,16 @@ def test_effective_position_needs_adds_flex_and_superflex_per_eligible_position(
     }
 
 
-
 def test_compute_personal_score_no_boost_once_need_met():
     settings = DraftSettings(teams=2, slots={'RB': 1})
     pool = pd.DataFrame.from_dict({
-        'rb_owned': {'position': 'RB', 'drafted': True, 'bye_week': 5},
         'rb2': {'position': 'RB', 'drafted': False, 'bye_week': 9},
     }, orient='index')
     bb_vorp = pd.Series({'rb2': 10.0})
+    my_roster = pd.DataFrame.from_dict(
+        {'rb_owned': {'position': 'RB', 'bye_week': 5}}, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_player_ids={'rb_owned'}, settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
 
     # Already have the 1 required RB -> multiplier stays at 1.0, no boost and no penalty.
     assert score['rb2'] == pytest.approx(10.0)
@@ -379,21 +371,49 @@ def test_compute_personal_score_no_boost_once_need_met():
 def test_compute_personal_score_discounts_bye_week_stacking():
     settings = DraftSettings(teams=2, slots={'WR': 3})
     pool = pd.DataFrame.from_dict({
-        'wr_owned_1': {'position': 'WR', 'drafted': True, 'bye_week': 7},
-        'wr_owned_2': {'position': 'WR', 'drafted': True, 'bye_week': 7},
         'wr_same_bye': {'position': 'WR', 'drafted': False, 'bye_week': 7},
         'wr_diff_bye': {'position': 'WR', 'drafted': False, 'bye_week': 11},
     }, orient='index')
     bb_vorp = pd.Series({'wr_same_bye': 10.0, 'wr_diff_bye': 10.0})
+    my_roster = pd.DataFrame.from_dict({
+        'wr_owned_1': {'position': 'WR', 'bye_week': 7},
+        'wr_owned_2': {'position': 'WR', 'bye_week': 7},
+    }, orient='index')
 
-    score = compute_personal_score(
-        pool, bb_vorp, my_player_ids={'wr_owned_1', 'wr_owned_2'}, settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
 
     # Still need 1 more WR (have 2 of 3) -> 2.0x need boost on both candidates.
     # wr_same_bye additionally discounted for stacking onto 2 already-owned bye-7 WRs.
     assert score['wr_diff_bye'] == pytest.approx(20.0)
     assert score['wr_same_bye'] == pytest.approx(20.0 / (1 + 0.15 * 2))
     assert score['wr_same_bye'] < score['wr_diff_bye']
+
+
+def test_build_my_roster_includes_picks_outside_recommendation_pool(monkeypatch):
+    from streamlit_app import Data, build_my_roster
+
+    sleeper_players = pd.DataFrame.from_dict({
+        'qb-with-projection': {'position': 'QB', 'first_name': 'Q', 'last_name': 'B', 'team': 'QTM'},
+        'k-picked': {'position': 'K', 'first_name': 'K', 'last_name': 'I', 'team': 'KTM'},
+    }, orient='index')
+    monkeypatch.setattr(Data, 'get_players', staticmethod(lambda: sleeper_players))
+
+    projections = pd.DataFrame.from_dict({
+        'qb-with-projection': {'mean_pts': 100.0, 'ceiling_90': 120.0, 'bye_week': 7},
+    }, orient='index')
+    picks = [
+        {'player_id': 'qb-with-projection', 'picked_by': 'user'},
+        {'player_id': 'k-picked', 'picked_by': 'user'},             # not a relevant recommendation position
+        {'player_id': 'missing-projection', 'picked_by': 'user'},  # no Sleeper projection row at all
+        {'player_id': 'other-team-pick', 'picked_by': 'someone-else'},
+    ]
+
+    roster = build_my_roster(picks, 'user', projections)
+
+    # All 3 of the user's own picks show up, including the K and the one Sleeper never projected.
+    assert set(roster.index) == {'qb-with-projection', 'k-picked', 'missing-projection'}
+    assert roster.loc['qb-with-projection', 'bye_week'] == 7
+
 
 
 def test_infer_bye_week_requires_exactly_one_missing_week():
