@@ -35,3 +35,41 @@ def player(**kwargs) -> dict:
     m = asdict(Player())
     m.update(kwargs)
     return m
+
+def draft(**kwargs) -> dict:
+    m = {
+        'type': 'snake',
+        'status': 'drafting',
+        'draft_id': '999',
+        'league_id': '123',
+        'settings': {
+            'teams': 12,
+            'slots_qb': 1,
+            'slots_rb': 2,
+            'slots_wr': 3,
+            'slots_te': 1,
+            'slots_flex': 1,
+            'slots_super_flex': 1,
+            'slots_k': 0,
+            'slots_def': 0,
+            'slots_bn': 15,
+        },
+        'draft_order': {'u1': 1, 'u2': 2},
+    }
+    m.update(kwargs)
+    return m
+
+def pick(**kwargs) -> dict:
+    m = {
+        'player_id': '1',
+        'picked_by': 'u1',
+        'roster_id': '1',
+        'round': 1,
+        'draft_slot': 1,
+        'pick_no': 1,
+        'metadata': {},
+        'is_keeper': None,
+        'draft_id': '999',
+    }
+    m.update(kwargs)
+    return m
