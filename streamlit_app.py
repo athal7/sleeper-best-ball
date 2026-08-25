@@ -9,6 +9,7 @@ from yattag import Doc
 import sleeper_wrapper as sleeper
 
 METADATA_TTL = 60 * 60  # 1 hour
+STATIC_TTL = 60 * 60 * 24  # 24 hours
 STATS_TTL = 60 * 5      # 5 minutes
 DRAFT_TTL = 60          # 60 seconds - live draft pick polling
 
@@ -169,7 +170,7 @@ class Data:
         return df[['avatar', 'username', 'name', 'record', 'rank']]
 
     @staticmethod
-    @st.cache_data(ttl=METADATA_TTL)
+    @st.cache_data(ttl=STATIC_TTL)
     def get_players() -> pd.DataFrame:
         return pd.DataFrame.from_dict(
             sleeper.Players().get_all_players("nfl"), orient='index')
@@ -180,7 +181,7 @@ class Data:
         return pd.DataFrame(sleeper.Stats().get_week_projections("regular", season, week))
 
     @staticmethod
-    @st.cache_data(ttl=METADATA_TTL)
+    @st.cache_data(ttl=STATIC_TTL)
     def get_bye_weeks(season: int) -> dict[str, int]:
         weekly_teams = {}
         for week in SEASON_WEEKS:
@@ -628,7 +629,7 @@ def _derive_bye_weeks(weekly_teams: dict[int, set[str]]) -> dict[str, int]:
 
 
 @st.cache_data(ttl=METADATA_TTL)
-def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
+def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, pd.Series]:
     weekly_points = {}
     weekly_adp = {}
     for week in SEASON_WEEKS:
@@ -640,13 +641,18 @@ def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
         if 'adp_dd_ppr' in stats.index:
             weekly_adp[week] = pd.to_numeric(
                 stats.loc['adp_dd_ppr'], errors='coerce')
-    weekly = pd.DataFrame(weekly_points)
+    adp = (pd.DataFrame(weekly_adp).bfill(axis=1).iloc[:, 0]
+           if weekly_adp else pd.Series(dtype=float))
+    return pd.DataFrame(weekly_points), adp
+
+
+@st.cache_data(ttl=METADATA_TTL)
+def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
+    weekly, adp = build_projection_inputs(season, scoring)
     mean_pts = weekly.sum(axis=1, skipna=True)
     p50_weekly = weekly.median(axis=1, skipna=True)
     ceiling_90 = (weekly.mean(axis=1, skipna=True) +
                   Z_90TH_PERCENTILE * weekly.std(axis=1, skipna=True).fillna(0.0))
-    adp = (pd.DataFrame(weekly_adp).bfill(axis=1).iloc[:, 0]
-           if weekly_adp else pd.Series(dtype=float))
     return pd.DataFrame({
         'mean_pts': mean_pts,
         'p50_weekly': p50_weekly,
@@ -655,7 +661,7 @@ def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
     })
 
 
-@st.cache_data(ttl=METADATA_TTL)
+@st.cache_data(ttl=DRAFT_TTL)
 def get_user_drafts(username: str, season: int) -> tuple[str, list]:
     """Returns (user_id, drafts) for the given Sleeper username and season."""
     user = sleeper.User(username)
@@ -787,6 +793,57 @@ def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
 
     return bb_vorp.reindex(undrafted.index) * need * bye_discount
 
+def _best_lineup_score(positions: pd.Series, scores: pd.Series,
+                       slots: list[str]) -> float:
+    states = {0: 0.0}
+    position_values = positions.to_numpy()
+    score_values = scores.fillna(0.0).to_numpy()
+    for slot in slots:
+        next_states = {}
+        for mask, total in states.items():
+            for index, position in enumerate(position_values):
+                if mask & (1 << index) or position not in SLOT_ELIGIBILITY[slot]:
+                    continue
+                candidate = total + score_values[index]
+                next_mask = mask | (1 << index)
+                next_states[next_mask] = max(next_states.get(next_mask, 0.0), candidate)
+        states = next_states
+    return max(states.values(), default=0.0)
+
+
+def compute_weekly_lineup_bonus(pool: pd.DataFrame, weekly_points: pd.DataFrame,
+                                my_roster: pd.DataFrame,
+                                settings: DraftSettings) -> pd.Series:
+    undrafted = pool[~pool['drafted']]
+    bonus = pd.Series(0.0, index=undrafted.index)
+    slots = [
+        slot
+        for slot, count in settings.slots.items()
+        for _ in range(count)
+    ]
+    roster_points = weekly_points.reindex(my_roster.index)
+    for week in weekly_points.columns:
+        scores = roster_points[week] if week in roster_points else pd.Series(dtype=float)
+        baseline = _best_lineup_score(my_roster['position'], scores, slots)
+        without_slot = [
+            _best_lineup_score(
+                my_roster['position'], scores, slots[:index] + slots[index + 1:])
+            for index in range(len(slots))
+        ]
+        candidate_scores = weekly_points[week].reindex(undrafted.index).fillna(0.0)
+        for position in undrafted['position'].unique():
+            eligible_scores = [
+                without_slot[index]
+                for index, slot in enumerate(slots)
+                if position in SLOT_ELIGIBILITY[slot]
+            ]
+            if eligible_scores:
+                candidate_index = undrafted.index[undrafted['position'] == position]
+                bonus.loc[candidate_index] += np.maximum(
+                    0.0, candidate_scores.loc[candidate_index] +
+                    max(eligible_scores) - baseline)
+    return bonus / max(len(weekly_points.columns), 1)
+
 
 def _on_clock_slot(draft: dict, pick_no: int) -> int:
     teams = draft['settings']['teams']
@@ -828,7 +885,7 @@ class DraftData:
             self.picks = self.get_picks(draft_id)
 
     @staticmethod
-    @st.cache_data(ttl=METADATA_TTL)
+    @st.cache_data(ttl=DRAFT_TTL)
     def get_draft(draft_id: str) -> dict:
         return sleeper.Drafts(draft_id).get_specific_draft()
 
@@ -904,12 +961,13 @@ def render_recommendations(pool: pd.DataFrame, demand: PositionDemand):
         ['personal_score', 'ceiling_90'], ascending=False).head(5).copy()
     top5['name'] = top5['first_name'] + ' ' + top5['last_name']
     top5['Cliff?'] = top5['position'].map(demand['is_cliff']).fillna(False)
-    display = top5[['name', 'position', 'team', 'p50_weekly', 'ceiling_90', 'bb_vorp', 'personal_score', 'Cliff?']]
+    display = top5[['name', 'position', 'team', 'p50_weekly', 'ceiling_90',
+                    'bb_vorp', 'weekly_lineup_bonus', 'personal_score', 'Cliff?']]
     styled = (display.style
               .apply(_highlight_cliff_row, axis=1)
               .format({
                   'p50_weekly': '{:.1f}', 'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}',
-                  'personal_score': '{:.1f}',
+                  'weekly_lineup_bonus': '{:.1f}', 'personal_score': '{:.1f}',
                   'Cliff?': lambda v: '\U0001f525 Cliff' if v else '',
               }))
     st.dataframe(styled, hide_index=True)
@@ -921,6 +979,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     settings = DraftSettings.from_draft(data.draft)
     scoring = fetch_draft_scoring(data.draft.get('league_id'))
     season = int(data.draft.get('season') or sleeper.get_sport_state('nfl')['league_season'])
+    weekly_points, _ = build_projection_inputs(season, scoring)
     projections = build_season_projections(season, scoring)
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
@@ -932,9 +991,13 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     pool = pool.assign(
         bb_vorp=compute_bb_vorp(pool, next_pick_pool).reindex(pool.index))
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
+    weekly_lineup_bonus = compute_weekly_lineup_bonus(
+        pool, weekly_points, my_roster, settings)
     personal_score = compute_personal_score(
-        pool, pool['bb_vorp'], my_roster, settings)
-    pool = pool.assign(personal_score=personal_score.reindex(pool.index))
+        pool, pool['bb_vorp'], my_roster, settings) + weekly_lineup_bonus
+    pool = pool.assign(
+        weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
+        personal_score=personal_score.reindex(pool.index))
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock · refreshes every {DRAFT_TTL}s")
     st.caption(

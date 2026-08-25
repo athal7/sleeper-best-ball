@@ -4,6 +4,7 @@ import pytest
 from streamlit_app import (
     compute_bb_vorp,
     compute_personal_score,
+    compute_weekly_lineup_bonus,
     effective_position_needs,
     is_users_turn,
     picks_until_current_turn,
@@ -164,6 +165,26 @@ def test_compute_bb_vorp_uses_players_available_at_next_pick():
     assert set(next_pick_pool.index) == {'qb_next', 'rb_next'}
     assert vorp['qb_now'] == pytest.approx(10)
     assert vorp['rb_now'] == pytest.approx(1)
+
+def test_weekly_lineup_bonus_rewards_players_who_improve_starting_lineups():
+    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
+    pool = build_pool({
+        'wr_upgrade': {'position': 'WR', 'drafted': False},
+        'qb_ineligible': {'position': 'QB', 'drafted': False},
+    })
+    weekly_points = pd.DataFrame({
+        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
+        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
+    })
+    my_roster = pd.DataFrame.from_dict({
+        'rb_owned': {'position': 'RB'},
+        'wr_owned': {'position': 'WR'},
+    }, orient='index')
+
+    bonus = compute_weekly_lineup_bonus(pool, weekly_points, my_roster, settings)
+
+    assert bonus['wr_upgrade'] == pytest.approx(7.0)
+    assert bonus['qb_ineligible'] == pytest.approx(0.0)
 
 
 @pytest.mark.parametrize("picks_made,user_id,expected", [
