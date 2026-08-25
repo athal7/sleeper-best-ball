@@ -6,6 +6,8 @@ from streamlit_app import (
     compute_personal_score,
     effective_position_needs,
     is_users_turn,
+    picks_until_next_user_pick,
+    players_available_at_next_pick,
     DraftData,
     DraftSettings,
     PositionDemand,
@@ -132,37 +134,36 @@ def test_position_demand_is_stable_regardless_of_other_positions_talent():
     assert demand_sparse.loc['TE', 'replacement_ceiling'] == demand_loaded.loc['TE', 'replacement_ceiling']
 
 
-def test_position_demand_flex_eligibility_extends_viable_tier(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
-    # RB is eligible for both FLEX and SUPER_FLEX -> 2 shared slots -> total is
-    # widened by (1 + 0.15*2) = 1.3x: round(3*1.3) = 4, one more than the base 3.
+def test_position_demand_uses_league_starter_demand():
     pool = build_pool({
-        'rb1': {'position': 'RB', 'mean_pts': 100, 'ceiling_90': 120, 'drafted': False},
-        'rb2': {'position': 'RB', 'mean_pts': 90, 'ceiling_90': 110, 'drafted': False},
-        'rb3': {'position': 'RB', 'mean_pts': 80, 'ceiling_90': 100, 'drafted': False},
-        'rb4': {'position': 'RB', 'mean_pts': 20, 'ceiling_90': 30, 'drafted': False},
-        'rb5': {'position': 'RB', 'mean_pts': 18, 'ceiling_90': 28, 'drafted': False},
+        f'qb{i}': {
+            'position': 'QB',
+            'mean_pts': 100 - i if i < 6 else 20 - i,
+            'ceiling_90': 120 - i if i < 6 else 40 - i,
+            'drafted': False,
+        }
+        for i in range(30)
     })
-    no_shared = PositionDemand(pool, FakeSettings({'RB'}, slots={}))
-    with_shared = PositionDemand(pool, FakeSettings({'RB'}, slots={'FLEX': 1, 'SUPER_FLEX': 1}))
+    demand = PositionDemand(
+        pool, DraftSettings(teams=12, slots={'QB': 1, 'SUPER_FLEX': 1}))
 
-    assert no_shared.loc['RB', 'total_viable'] == 3
-    assert with_shared.loc['RB', 'total_viable'] == 4
+    assert demand.loc['QB', 'total_viable'] == 24
 
 
-def test_compute_bb_vorp_has_no_scarcity_multiplier(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
+def test_compute_bb_vorp_uses_players_available_at_next_pick():
     pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 100, 'ceiling_90': 120, 'drafted': True},
-        'te2': {'position': 'TE', 'mean_pts': 90, 'ceiling_90': 110, 'drafted': False},
-        'te3': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 30, 'drafted': False},
+        'qb_now': {'position': 'QB', 'ceiling_90': 30, 'adp': 1, 'drafted': False},
+        'qb_next': {'position': 'QB', 'ceiling_90': 20, 'adp': 4, 'drafted': False},
+        'rb_now': {'position': 'RB', 'ceiling_90': 26, 'adp': 2, 'drafted': False},
+        'rb_next': {'position': 'RB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
     })
-    demand = PositionDemand(pool, FakeSettings({'TE'}, slots={}))
-    vorp = compute_bb_vorp(pool, demand)
 
-    # Pure ceiling-minus-replacement, no multiplication by scarcity_multiplier.
-    assert vorp['te2'] == pytest.approx(110 - 110)
-    assert vorp['te3'] == pytest.approx(30 - 110)
+    next_pick_pool = players_available_at_next_pick(pool, picks_until_next_pick=2)
+    vorp = compute_bb_vorp(pool, next_pick_pool)
+
+    assert set(next_pick_pool.index) == {'qb_next', 'rb_next'}
+    assert vorp['qb_now'] == pytest.approx(10)
+    assert vorp['rb_now'] == pytest.approx(1)
 
 
 @pytest.mark.parametrize("picks_made,user_id,expected", [
@@ -194,6 +195,18 @@ def test_is_users_turn_unknown_user_is_false():
         'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
     }
     assert is_users_turn(draft, 0, 'ghost') is False
+def test_picks_until_next_user_pick_uses_snake_turn_order():
+    draft = {
+        'type': 'snake',
+        'settings': {'teams': 4},
+        'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
+    }
+
+    assert picks_until_next_user_pick(draft, 0, 'u1') == 6
+    assert picks_until_next_user_pick(draft, 1, 'u1') == 6
+    assert picks_until_next_user_pick(draft, 3, 'u4') == 0
+
+
 
 
 def test_draft_data_bypasses_network_when_fields_provided():
@@ -215,20 +228,22 @@ def test_build_player_pool_end_to_end(monkeypatch):
     monkeypatch.setattr(Data, 'get_players', staticmethod(lambda: sleeper_players))
 
     projections = pd.DataFrame.from_dict({
-        '1': {'mean_pts': 20.0, 'ceiling_90': 30.0},
-        '2': {'mean_pts': 15.0, 'ceiling_90': 22.0},
-        '3': {'mean_pts': 5.0, 'ceiling_90': 8.0},
+        '1': {'mean_pts': 20.0, 'ceiling_90': 30.0, 'adp': 10},
+        '2': {'mean_pts': 15.0, 'ceiling_90': 22.0, 'adp': 20},
+        '3': {'mean_pts': 5.0, 'ceiling_90': 8.0, 'adp': 30},
     }, orient='index')
 
     settings = DraftSettings(teams=2, slots={'QB': 1, 'RB': 1})
     picks = [mock.pick(player_id='1')]
 
-    pool = build_player_pool(projections, settings, picks)
+    pool = build_player_pool(projections, settings, picks, {'AAA': 5, 'BBB': 9})
 
     # K is filtered out: not a relevant position for this draft's slots.
     assert set(pool.index) == {'1', '2'}
     assert bool(pool.loc['1', 'drafted']) is True
     assert bool(pool.loc['2', 'drafted']) is False
+    assert pool.loc['1', 'bye_week'] == 5
+    assert pool.loc['2', 'bye_week'] == 9
 
 
 def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monkeypatch):
@@ -238,9 +253,9 @@ def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monke
     # (absent from that week's projections) and should not drag down their
     # season total or be treated as a zero for variance.
     weekly_stats = {
-        1: pd.DataFrame({'1': {'pass_yd': 250}, '2': {'rec_yd': 50}}),
-        2: pd.DataFrame({'1': {'pass_yd': 250}}),
-        3: pd.DataFrame({'1': {'pass_yd': 250}, '2': {'rec_yd': 50}}),
+        1: pd.DataFrame({'1': {'pass_yd': 250, 'adp_dd_ppr': 10}, '2': {'rec_yd': 50, 'adp_dd_ppr': 20}}),
+        2: pd.DataFrame({'1': {'pass_yd': 250, 'adp_dd_ppr': 10}}),
+        3: pd.DataFrame({'1': {'pass_yd': 250, 'adp_dd_ppr': 10}, '2': {'rec_yd': 50, 'adp_dd_ppr': 20}}),
     }
     monkeypatch.setattr(Data, 'get_projections', staticmethod(lambda season, week: weekly_stats.get(week, pd.DataFrame())))
 
@@ -253,6 +268,8 @@ def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monke
     # Player '2': only 2 weeks played (week 2 excluded, not counted as 0) -> total = 2 * 5 = 10.
     assert result.loc['2', 'mean_pts'] == pytest.approx(10.0)
     assert result.loc['2', 'ceiling_90'] == pytest.approx(5.0)
+    assert result.loc['1', 'adp'] == pytest.approx(10.0)
+    assert result.loc['2', 'adp'] == pytest.approx(20.0)
 
 
 def test_build_season_projections_skips_empty_weeks(monkeypatch):
@@ -341,15 +358,17 @@ def test_compute_personal_score_superflex_boosts_second_qb_need():
     assert score['qb2'] == pytest.approx(20.0)
 
 
-def test_effective_position_needs_adds_flex_and_superflex_per_eligible_position():
-    settings = DraftSettings(teams=1, slots={'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1})
-    needs = effective_position_needs(settings)
+def test_effective_position_needs_allocates_superflex_to_quarterbacks():
+    settings = DraftSettings(
+        teams=1,
+        slots={'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1},
+    )
 
-    assert needs == {
-        'QB': 1 + 1,           # dedicated + SUPER_FLEX
-        'RB': 2 + 1 + 1,       # dedicated + FLEX + SUPER_FLEX
-        'WR': 3 + 1 + 1,
-        'TE': 1 + 1 + 1,
+    assert effective_position_needs(settings) == {
+        'QB': 2,
+        'RB': 3,
+        'WR': 4,
+        'TE': 2,
     }
 
 
@@ -398,29 +417,61 @@ def test_build_my_roster_includes_picks_outside_recommendation_pool(monkeypatch)
     }, orient='index')
     monkeypatch.setattr(Data, 'get_players', staticmethod(lambda: sleeper_players))
 
-    projections = pd.DataFrame.from_dict({
-        'qb-with-projection': {'mean_pts': 100.0, 'ceiling_90': 120.0, 'bye_week': 7},
-    }, orient='index')
     picks = [
         {'player_id': 'qb-with-projection', 'picked_by': 'user'},
-        {'player_id': 'k-picked', 'picked_by': 'user'},             # not a relevant recommendation position
-        {'player_id': 'missing-projection', 'picked_by': 'user'},  # no Sleeper projection row at all
+        {'player_id': 'k-picked', 'picked_by': 'user'},
+        {'player_id': 'missing-projection', 'picked_by': 'user'},
         {'player_id': 'other-team-pick', 'picked_by': 'someone-else'},
     ]
 
-    roster = build_my_roster(picks, 'user', projections)
+    roster = build_my_roster(picks, 'user', {'QTM': 7, 'KTM': 10})
 
     # All 3 of the user's own picks show up, including the K and the one Sleeper never projected.
     assert set(roster.index) == {'qb-with-projection', 'k-picked', 'missing-projection'}
     assert roster.loc['qb-with-projection', 'bye_week'] == 7
 
+def test_get_bye_weeks_uses_team_schedule(monkeypatch):
+    from streamlit_app import Data
+
+    class Response:
+        def __init__(self, teams):
+            self.teams = teams
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'events': [{
+                    'competitions': [{
+                        'competitors': [
+                            {'team': {'abbreviation': team}}
+                            for team in self.teams
+                        ],
+                    }],
+                }],
+            }
+
+    def get_schedule(url, params):
+        teams = ['WSH', 'SEA'] if params['week'] != 7 else ['SEA']
+        return Response(teams)
+
+    Data.get_bye_weeks.clear()
+    monkeypatch.setattr('streamlit_app.requests.get', get_schedule)
+
+    assert Data.get_bye_weeks(2030) == {'WAS': 7}
 
 
-def test_infer_bye_week_requires_exactly_one_missing_week():
-    from streamlit_app import _infer_bye_week
-    import numpy as np
 
-    assert _infer_bye_week(pd.Series({1: 10.0, 2: np.nan, 3: 12.0})) == 2
-    assert _infer_bye_week(pd.Series({1: 10.0, 2: 11.0, 3: 12.0})) is None
-    assert _infer_bye_week(pd.Series({1: np.nan, 2: np.nan, 3: 12.0})) is None
+def test_derive_bye_weeks_requires_exactly_one_absence():
+    from streamlit_app import _derive_bye_weeks
+
+    weekly_teams = {
+        1: {'AAA', 'BBB'},
+        2: {'AAA', 'BBB'},
+        3: {'AAA'},
+        4: {'AAA', 'BBB'},
+    }
+
+    assert _derive_bye_weeks(weekly_teams) == {'BBB': 3}
 

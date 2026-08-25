@@ -6,7 +6,7 @@ league_id = "1312060096066355200"
 
 
 def _app():
-    return AppTest.from_file("streamlit_app.py", default_timeout=10)
+    return AppTest.from_file("../streamlit_app.py", default_timeout=10)
 
 
 def test_by_username_input():
