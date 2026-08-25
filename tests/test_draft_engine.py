@@ -6,7 +6,7 @@ from streamlit_app import (
     compute_personal_score,
     effective_position_needs,
     is_users_turn,
-    picks_until_next_user_pick,
+    picks_until_current_turn,
     players_available_at_next_pick,
     DraftData,
     DraftSettings,
@@ -195,16 +195,16 @@ def test_is_users_turn_unknown_user_is_false():
         'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
     }
     assert is_users_turn(draft, 0, 'ghost') is False
-def test_picks_until_next_user_pick_uses_snake_turn_order():
+def test_picks_until_current_turn_uses_snake_turn_order():
     draft = {
         'type': 'snake',
         'settings': {'teams': 4},
         'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
     }
 
-    assert picks_until_next_user_pick(draft, 0, 'u1') == 6
-    assert picks_until_next_user_pick(draft, 1, 'u1') == 6
-    assert picks_until_next_user_pick(draft, 3, 'u4') == 0
+    assert picks_until_current_turn(draft, 0) == 6
+    assert picks_until_current_turn(draft, 1) == 4
+    assert picks_until_current_turn(draft, 3) == 0
 
 
 
@@ -268,6 +268,8 @@ def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monke
     # Player '2': only 2 weeks played (week 2 excluded, not counted as 0) -> total = 2 * 5 = 10.
     assert result.loc['2', 'mean_pts'] == pytest.approx(10.0)
     assert result.loc['2', 'ceiling_90'] == pytest.approx(5.0)
+    assert result.loc['1', 'p50_weekly'] == pytest.approx(10.0)
+    assert result.loc['2', 'p50_weekly'] == pytest.approx(5.0)
     assert result.loc['1', 'adp'] == pytest.approx(10.0)
     assert result.loc['2', 'adp'] == pytest.approx(20.0)
 

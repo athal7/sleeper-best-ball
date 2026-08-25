@@ -642,12 +642,14 @@ def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
                 stats.loc['adp_dd_ppr'], errors='coerce')
     weekly = pd.DataFrame(weekly_points)
     mean_pts = weekly.sum(axis=1, skipna=True)
+    p50_weekly = weekly.median(axis=1, skipna=True)
     ceiling_90 = (weekly.mean(axis=1, skipna=True) +
                   Z_90TH_PERCENTILE * weekly.std(axis=1, skipna=True).fillna(0.0))
     adp = (pd.DataFrame(weekly_adp).bfill(axis=1).iloc[:, 0]
            if weekly_adp else pd.Series(dtype=float))
     return pd.DataFrame({
         'mean_pts': mean_pts,
+        'p50_weekly': p50_weekly,
         'ceiling_90': ceiling_90,
         'adp': adp,
     })
@@ -795,17 +797,14 @@ def _on_clock_slot(draft: dict, pick_no: int) -> int:
     return pos_in_round if round_no % 2 == 1 else teams - pos_in_round + 1
 
 
-def picks_until_next_user_pick(draft: dict, picks_made: int, user_id: str) -> int:
+def picks_until_current_turn(draft: dict, picks_made: int) -> int:
     if draft.get('type') == 'auction':
         return 0
-    user_slot = (draft.get('draft_order') or {}).get(user_id)
-    if user_slot is None:
-        return 0
     current_pick = picks_made + 1
-    is_current_pick = _on_clock_slot(draft, current_pick) == user_slot
-    for pick_no in range(current_pick + is_current_pick, current_pick + 2 * draft['settings']['teams']):
-        if _on_clock_slot(draft, pick_no) == user_slot:
-            return pick_no - current_pick - is_current_pick
+    current_slot = _on_clock_slot(draft, current_pick)
+    for pick_no in range(current_pick + 1, current_pick + 2 * draft['settings']['teams']):
+        if _on_clock_slot(draft, pick_no) == current_slot:
+            return pick_no - current_pick - 1
     return 0
 
 
@@ -901,17 +900,16 @@ def _highlight_cliff_row(row: pd.Series) -> list[str]:
 
 def render_recommendations(pool: pd.DataFrame, demand: PositionDemand):
     st.subheader("Top 5 Recommendations")
-    top5 = pool[
-        (~pool['drafted']) & pool['available_at_next_pick']
-    ].sort_values(
+    top5 = pool[~pool['drafted']].sort_values(
         ['personal_score', 'ceiling_90'], ascending=False).head(5).copy()
     top5['name'] = top5['first_name'] + ' ' + top5['last_name']
     top5['Cliff?'] = top5['position'].map(demand['is_cliff']).fillna(False)
-    display = top5[['name', 'position', 'team', 'ceiling_90', 'bb_vorp', 'personal_score', 'Cliff?']]
+    display = top5[['name', 'position', 'team', 'p50_weekly', 'ceiling_90', 'bb_vorp', 'personal_score', 'Cliff?']]
     styled = (display.style
               .apply(_highlight_cliff_row, axis=1)
               .format({
-                  'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}', 'personal_score': '{:.1f}',
+                  'p50_weekly': '{:.1f}', 'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}',
+                  'personal_score': '{:.1f}',
                   'Cliff?': lambda v: '\U0001f525 Cliff' if v else '',
               }))
     st.dataframe(styled, hide_index=True)
@@ -927,17 +925,12 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
     demand = PositionDemand(pool, settings)
-    picks_until_next_pick = picks_until_next_user_pick(
-        data.draft, len(data.picks), user_id)
+    picks_until_next_pick = picks_until_current_turn(data.draft, len(data.picks))
     next_pick_pool = players_available_at_next_pick(
         pool, picks_until_next_pick)
     users_turn = is_users_turn(data.draft, len(data.picks), user_id)
-    available_at_next_pick = (
-        pool[~pool['drafted']].index if users_turn else next_pick_pool.index)
     pool = pool.assign(
-        bb_vorp=compute_bb_vorp(pool, next_pick_pool).reindex(pool.index),
-        available_at_next_pick=pool.index.isin(available_at_next_pick),
-    )
+        bb_vorp=compute_bb_vorp(pool, next_pick_pool).reindex(pool.index))
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
     personal_score = compute_personal_score(
         pool, pool['bb_vorp'], my_roster, settings)
@@ -945,11 +938,11 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock · refreshes every {DRAFT_TTL}s")
     st.caption(
-        f"VORP uses ADP to model the {picks_until_next_pick} picks before your next turn.")
+        f"VORP uses ADP to model the {picks_until_next_pick} picks before this turn's next pick.")
     if users_turn:
         st.success("It's your turn!")
     else:
-        st.caption("Players expected to be gone before your pick are excluded.")
+        st.caption("Not your turn yet — best available shown below anyway.")
     render_my_roster(my_roster, settings)
     render_recommendations(pool, demand)
 
