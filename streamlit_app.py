@@ -235,6 +235,7 @@ class Positions(pd.DataFrame):
 SLOT_ELIGIBILITY = {slot: eligible for slot, _, eligible in Positions.MAPPINGS}
 
 
+
 @dataclass
 class DraftSettings:
     teams: int
@@ -699,11 +700,7 @@ class PositionDemand(pd.DataFrame):
             own = pool[(pool['position'] == pos) & (pool['mean_pts'] > 0)] \
                 .sort_values('mean_pts', ascending=False)
             base_total = self._find_replacement_rank(own['mean_pts'].to_numpy())
-            starter_demand = (
-                getattr(settings, 'teams', 0)
-                * effective_position_needs(settings).get(pos, 0)
-            )
-            total = max(base_total, starter_demand)
+            total = base_total
             viable = own.iloc[:total]
             undrafted_viable = viable[~viable['drafted']]
             remaining = len(undrafted_viable)
@@ -741,54 +738,22 @@ def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
     return undrafted['ceiling_90'] - undrafted['position'].map(replacement).fillna(0.0)
 
 
-def effective_position_needs(settings: DraftSettings) -> dict[str, int]:
-    needs = {
-        slot: count
-        for slot, count in settings.slots.items()
-        if slot not in ('FLEX', 'SUPER_FLEX')
-    }
-    for pos in SLOT_ELIGIBILITY['FLEX']:
-        needs[pos] = needs.get(pos, 0) + settings.slots.get('FLEX', 0)
-    needs['QB'] = needs.get('QB', 0) + settings.slots.get('SUPER_FLEX', 0)
-    return needs
 
 
 BYE_OVERLAP_DECAY = 0.15  # per already-owned same-position/same-bye player
 
 
 def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
-                            my_roster: pd.DataFrame, settings: DraftSettings) -> pd.Series:
-    """Adjusts league-wide BB-VORP for the user's own roster construction:
-
-    - Need boost: +1.0x per still-unfilled slot toward effective_position_needs
-      (dedicated + FLEX/SUPER_FLEX-driven extras - e.g. in a superflex league,
-      still need 2 of 2 effective QB slots -> 3.0x, need 0 more -> 1.0x/no change).
-    - Bye-week discount: divides by (1 + BYE_OVERLAP_DECAY * n) where n is how
-      many of the user's own players at that position already share that bye
-      week - best ball lineups lose depth the week several similar players
-      are all out, so stacking is discouraged, never disqualified.
-
-    Positions/players are never penalized below the pure BB-VORP baseline for
-    already having "enough" - best ball drafts many bench players beyond the
-    minimum starters, and depth still has value. my_roster is the user's full
-    roster (see build_my_roster) - independent of the recommendation pool's
-    relevant-position/has-projection filtering.
-    """
-    my_position_counts = my_roster['position'].value_counts()
-    need_multiplier = {
-        pos: 1.0 + max(0, needed - my_position_counts.get(pos, 0))
-        for pos, needed in effective_position_needs(settings).items()
-    }
+                           my_roster: pd.DataFrame) -> pd.Series:
     bye_counts = my_roster.groupby(['position', 'bye_week']).size()
 
     undrafted = pool[~pool['drafted']]
-    need = undrafted['position'].map(need_multiplier).fillna(1.0)
     overlap_keys = pd.MultiIndex.from_arrays([undrafted['position'], undrafted['bye_week']])
     overlap = pd.Series(
         bye_counts.reindex(overlap_keys).fillna(0).to_numpy(), index=undrafted.index)
     bye_discount = 1.0 / (1 + BYE_OVERLAP_DECAY * overlap)
 
-    return bb_vorp.reindex(undrafted.index) * need * bye_discount
+    return bb_vorp.reindex(undrafted.index) * bye_discount
 
 def _best_lineup_score(positions: pd.Series, scores: pd.Series,
                        slots: list[str]) -> float:
@@ -934,17 +899,14 @@ class Context:
             self.leagues.append(League(data=data))
 
 
-def render_my_roster(my_roster: pd.DataFrame, settings: DraftSettings):
+def render_my_roster(my_roster: pd.DataFrame):
     st.subheader("Your Roster So Far")
     if my_roster.empty:
         st.caption("No picks yet.")
         return
-    counts = my_roster['position'].value_counts()
-    needs = ", ".join(
-        f"{pos} {counts.get(pos, 0)}/{needed}"
-        for pos, needed in effective_position_needs(settings).items()
-    )
-    st.caption(f"Effective starter progress (incl. FLEX/SUPER_FLEX demand): {needs}")
+    counts = my_roster['position'].value_counts().sort_index()
+    positions = ", ".join(f"{pos} {count}" for pos, count in counts.items())
+    st.caption(f"Position counts: {positions}")
     display = my_roster.copy()
     display['name'] = display['first_name'] + ' ' + display['last_name']
     st.dataframe(
@@ -994,8 +956,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
     weekly_lineup_bonus = compute_weekly_lineup_bonus(
         pool, weekly_points, my_roster, settings)
-    personal_score = compute_personal_score(
-        pool, pool['bb_vorp'], my_roster, settings) + weekly_lineup_bonus
+    personal_score = compute_personal_score(pool, pool['bb_vorp'], my_roster) + weekly_lineup_bonus
     pool = pool.assign(
         weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
         personal_score=personal_score.reindex(pool.index))
@@ -1008,7 +969,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
         st.success("It's your turn!")
     else:
         st.caption("Not your turn yet — best available shown below anyway.")
-    render_my_roster(my_roster, settings)
+    render_my_roster(my_roster)
     render_recommendations(pool, demand)
 
 
