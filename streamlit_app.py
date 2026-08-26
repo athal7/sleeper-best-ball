@@ -732,15 +732,12 @@ class PositionDemand(pd.DataFrame):
         return idx + 1
 
 
-def players_available_at_next_pick(pool: pd.DataFrame,
-                                   picks_until_next_pick: int) -> pd.DataFrame:
-    return pool[~pool['drafted']].sort_values(
-        'adp', na_position='last').iloc[picks_until_next_pick:]
-
-
-def compute_bb_vorp(pool: pd.DataFrame, next_pick_pool: pd.DataFrame) -> pd.Series:
-    undrafted = pool[~pool['drafted']]
-    replacement = next_pick_pool.groupby('position')['ceiling_90'].max()
+def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
+    undrafted = pool.loc[~pool['drafted']]
+    replacement_candidates = undrafted.loc[undrafted['adp'].gt(next_pick_number)]
+    replacement = replacement_candidates.loc[
+        replacement_candidates.groupby('position')['adp'].idxmin()
+    ].set_index('position')['ceiling_90']
     return undrafted['ceiling_90'] - undrafted['position'].map(replacement).fillna(0.0)
 
 
@@ -854,15 +851,20 @@ def _on_clock_slot(draft: dict, pick_no: int) -> int:
     return pos_in_round if round_no % 2 == 1 else teams - pos_in_round + 1
 
 
-def picks_until_current_turn(draft: dict, picks_made: int) -> int:
-    if draft.get('type') == 'auction':
-        return 0
+def next_user_pick_number(draft: dict, picks_made: int, user_id: str) -> int:
     current_pick = picks_made + 1
-    current_slot = _on_clock_slot(draft, current_pick)
-    for pick_no in range(current_pick + 1, current_pick + 2 * draft['settings']['teams']):
-        if _on_clock_slot(draft, pick_no) == current_slot:
-            return pick_no - current_pick - 1
-    return 0
+    if draft.get('type') == 'auction':
+        return current_pick
+
+    user_slot = (draft.get('draft_order') or {}).get(user_id)
+    if user_slot is None:
+        return current_pick
+
+    teams = draft['settings']['teams']
+    for pick_no in range(current_pick, current_pick + 2 * teams):
+        if _on_clock_slot(draft, pick_no) == user_slot:
+            return pick_no
+    return current_pick
 
 
 def is_users_turn(draft: dict, picks_made: int, user_id: str) -> bool:
@@ -984,12 +986,11 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
     demand = PositionDemand(pool, settings)
-    picks_until_next_pick = picks_until_current_turn(data.draft, len(data.picks))
-    next_pick_pool = players_available_at_next_pick(
-        pool, picks_until_next_pick)
+    next_pick_number = next_user_pick_number(
+        data.draft, len(data.picks), user_id)
     users_turn = is_users_turn(data.draft, len(data.picks), user_id)
     pool = pool.assign(
-        bb_vorp=compute_bb_vorp(pool, next_pick_pool).reindex(pool.index))
+        bb_vorp=compute_bb_vorp(pool, next_pick_number).reindex(pool.index))
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
     weekly_lineup_bonus = compute_weekly_lineup_bonus(
         pool, weekly_points, my_roster, settings)
@@ -1001,7 +1002,8 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock · refreshes every {DRAFT_TTL}s")
     st.caption(
-        f"VORP uses ADP to model the {picks_until_next_pick} picks before this turn's next pick.")
+        f"VORP compares each player with the first same-position ADP after "
+        f"your next pick (Pick {next_pick_number}).")
     if users_turn:
         st.success("It's your turn!")
     else:
