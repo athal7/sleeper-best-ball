@@ -5,7 +5,6 @@ from streamlit_app import (
     compute_bb_vorp,
     compute_personal_score,
     compute_weekly_lineup_bonus,
-    effective_position_needs,
     is_users_turn,
     next_user_pick_number,
     DraftData,
@@ -134,20 +133,20 @@ def test_position_demand_is_stable_regardless_of_other_positions_talent():
     assert demand_sparse.loc['TE', 'replacement_ceiling'] == demand_loaded.loc['TE', 'replacement_ceiling']
 
 
-def test_position_demand_uses_league_starter_demand():
+def test_position_demand_uses_projection_tier_not_league_slots():
     pool = build_pool({
         f'qb{i}': {
             'position': 'QB',
-            'mean_pts': 100 - i if i < 6 else 20 - i,
-            'ceiling_90': 120 - i if i < 6 else 40 - i,
+            'mean_pts': 100 - i if i < 6 else 20 - i / 10,
+            'ceiling_90': 120 - i,
             'drafted': False,
         }
-        for i in range(30)
+        for i in range(40)
     })
     demand = PositionDemand(
         pool, DraftSettings(teams=12, slots={'QB': 1, 'SUPER_FLEX': 1}))
 
-    assert demand.loc['QB', 'total_viable'] == 24
+    assert demand.loc['QB', 'total_viable'] == 6
 
 
 def test_compute_bb_vorp_uses_earliest_position_adp_after_next_pick():
@@ -183,6 +182,24 @@ def test_weekly_lineup_bonus_rewards_players_who_improve_starting_lineups():
 
     assert bonus['wr_upgrade'] == pytest.approx(7.0)
     assert bonus['qb_ineligible'] == pytest.approx(0.0)
+
+def test_weekly_lineup_bonus_values_second_qb_in_superflex():
+    settings = DraftSettings(teams=1, slots={'QB': 1, 'SUPER_FLEX': 1})
+    pool = build_pool({
+        'qb_upgrade': {'position': 'QB', 'drafted': False},
+    })
+    weekly_points = pd.DataFrame({
+        1: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
+        2: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
+    })
+    my_roster = pd.DataFrame.from_dict({
+        'qb_owned': {'position': 'QB'},
+        'rb_owned': {'position': 'RB'},
+    }, orient='index')
+
+    bonus = compute_weekly_lineup_bonus(pool, weekly_points, my_roster, settings)
+
+    assert bonus['qb_upgrade'] == pytest.approx(4.0)
 
 
 @pytest.mark.parametrize("picks_made,user_id,expected", [
@@ -345,9 +362,7 @@ def test_get_user_drafts_returns_id_and_drafts(monkeypatch):
     assert drafts == [{'draft_id': 'd1', 'status': 'drafting'}]
 
 
-def test_compute_personal_score_boosts_unmet_position_need():
-    # Settings need 2 RB dedicated starters; user has drafted 0 so far.
-    settings = DraftSettings(teams=2, slots={'RB': 2, 'WR': 1})
+def test_compute_personal_score_has_no_position_target_boost():
     pool = pd.DataFrame.from_dict({
         'rb1': {'position': 'RB', 'drafted': False, 'bye_week': 5},
         'wr1': {'position': 'WR', 'drafted': False, 'bye_week': 5},
@@ -355,61 +370,14 @@ def test_compute_personal_score_boosts_unmet_position_need():
     bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
     my_roster = pd.DataFrame(columns=['position', 'bye_week'])
 
-    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster)
 
-    # RB: need 2, have 0 -> 1.0 + 2 = 3.0x. WR: need 1, have 0 -> 1.0 + 1 = 2.0x.
-    assert score['rb1'] == pytest.approx(30.0)
-    assert score['wr1'] == pytest.approx(20.0)
+    assert score['rb1'] == pytest.approx(10.0)
+    assert score['wr1'] == pytest.approx(10.0)
 
-
-def test_compute_personal_score_superflex_boosts_second_qb_need():
-    # 1 dedicated QB slot + 1 SUPER_FLEX (QB-eligible) -> effective QB need is 2,
-    # not just the 1 dedicated slot. With 1 QB already owned, still 1 short.
-    settings = DraftSettings(teams=12, slots={'QB': 1, 'SUPER_FLEX': 1})
-    pool = pd.DataFrame.from_dict({
-        'qb2': {'position': 'QB', 'drafted': False, 'bye_week': 9},
-    }, orient='index')
-    bb_vorp = pd.Series({'qb2': 10.0})
-    my_roster = pd.DataFrame.from_dict(
-        {'qb_owned': {'position': 'QB', 'bye_week': 5}}, orient='index')
-
-    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
-
-    # Effective need = 1 (dedicated) + 1 (SUPER_FLEX) = 2; have 1 -> still 1.0x boost -> 2.0x total.
-    assert score['qb2'] == pytest.approx(20.0)
-
-
-def test_effective_position_needs_allocates_superflex_to_quarterbacks():
-    settings = DraftSettings(
-        teams=1,
-        slots={'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1},
-    )
-
-    assert effective_position_needs(settings) == {
-        'QB': 2,
-        'RB': 3,
-        'WR': 4,
-        'TE': 2,
-    }
-
-
-def test_compute_personal_score_no_boost_once_need_met():
-    settings = DraftSettings(teams=2, slots={'RB': 1})
-    pool = pd.DataFrame.from_dict({
-        'rb2': {'position': 'RB', 'drafted': False, 'bye_week': 9},
-    }, orient='index')
-    bb_vorp = pd.Series({'rb2': 10.0})
-    my_roster = pd.DataFrame.from_dict(
-        {'rb_owned': {'position': 'RB', 'bye_week': 5}}, orient='index')
-
-    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
-
-    # Already have the 1 required RB -> multiplier stays at 1.0, no boost and no penalty.
-    assert score['rb2'] == pytest.approx(10.0)
 
 
 def test_compute_personal_score_discounts_bye_week_stacking():
-    settings = DraftSettings(teams=2, slots={'WR': 3})
     pool = pd.DataFrame.from_dict({
         'wr_same_bye': {'position': 'WR', 'drafted': False, 'bye_week': 7},
         'wr_diff_bye': {'position': 'WR', 'drafted': False, 'bye_week': 11},
@@ -420,12 +388,10 @@ def test_compute_personal_score_discounts_bye_week_stacking():
         'wr_owned_2': {'position': 'WR', 'bye_week': 7},
     }, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_roster, settings=settings)
+    score = compute_personal_score(pool, bb_vorp, my_roster)
 
-    # Still need 1 more WR (have 2 of 3) -> 2.0x need boost on both candidates.
-    # wr_same_bye additionally discounted for stacking onto 2 already-owned bye-7 WRs.
-    assert score['wr_diff_bye'] == pytest.approx(20.0)
-    assert score['wr_same_bye'] == pytest.approx(20.0 / (1 + 0.15 * 2))
+    assert score['wr_diff_bye'] == pytest.approx(10.0)
+    assert score['wr_same_bye'] == pytest.approx(10.0 / (1 + 0.15 * 2))
     assert score['wr_same_bye'] < score['wr_diff_bye']
 
 
