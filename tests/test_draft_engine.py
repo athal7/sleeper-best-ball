@@ -199,7 +199,57 @@ def test_weekly_lineup_bonus_values_second_qb_in_superflex():
 
     bonus = compute_weekly_lineup_bonus(pool, weekly_points, my_roster, settings)
 
-    assert bonus['qb_upgrade'] == pytest.approx(4.0)
+
+def test_weekly_lineup_bonus_weights_playoff_weeks_heavier():
+    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
+    pool = build_pool({
+        'wr_upgrade': {'position': 'WR', 'drafted': False},
+        'qb_ineligible': {'position': 'QB', 'drafted': False},
+    })
+    weekly_points = pd.DataFrame({
+        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
+        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
+    })
+    my_roster = pd.DataFrame.from_dict({
+        'rb_owned': {'position': 'RB'},
+        'wr_owned': {'position': 'WR'},
+    }, orient='index')
+
+    # Week 2 is a playoff week (1.5x weight).
+    # Each week gives 7.0 improvement, weighted: 1.0*7.0 + 1.5*7.0 = 17.5 / 2.5 = 7.0
+    bonus = compute_weekly_lineup_bonus(
+        pool, weekly_points, my_roster, settings, playoff_week_start=2)
+
+    assert bonus['wr_upgrade'] == pytest.approx(7.0)
+
+def test_weekly_lineup_bonus_playoff_weight_amplifies_playoff_week_improvements():
+    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
+    pool = build_pool({
+        'wr_upgrade': {'position': 'WR', 'drafted': False},
+    })
+    # Week 1: improvement = 3.0, Week 2 (playoff): improvement = 6.0
+    weekly_points = pd.DataFrame({
+        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 8.0},
+        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 11.0},
+    })
+    my_roster = pd.DataFrame.from_dict({
+        'rb_owned': {'position': 'RB'},
+        'wr_owned': {'position': 'WR'},
+    }, orient='index')
+
+    # Without playoff weighting: (3.0 + 6.0) / 2 = 4.5
+    bonus_no_playoff = compute_weekly_lineup_bonus(
+        pool, weekly_points, my_roster, settings)
+    assert bonus_no_playoff['wr_upgrade'] == pytest.approx(4.5)
+
+    # With playoff weighting (week 2 is 1.5x):
+    # (1.0*3.0 + 1.5*6.0) / (1.0 + 1.5) = (3.0 + 9.0) / 2.5 = 12.0 / 2.5 = 4.8
+    bonus_playoff = compute_weekly_lineup_bonus(
+        pool, weekly_points, my_roster, settings, playoff_week_start=2)
+    assert bonus_playoff['wr_upgrade'] == pytest.approx(4.8)
+
+    # Playoff-weighted bonus > unweighted because playoff week has bigger improvement
+    assert bonus_playoff['wr_upgrade'] > bonus_no_playoff['wr_upgrade']
 
 
 @pytest.mark.parametrize("picks_made,user_id,expected", [

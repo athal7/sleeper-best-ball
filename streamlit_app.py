@@ -775,7 +775,8 @@ def _best_lineup_score(positions: pd.Series, scores: pd.Series,
 
 def compute_weekly_lineup_bonus(pool: pd.DataFrame, weekly_points: pd.DataFrame,
                                 my_roster: pd.DataFrame,
-                                settings: DraftSettings) -> pd.Series:
+                                settings: DraftSettings,
+                                playoff_week_start: int | None = None) -> pd.Series:
     undrafted = pool[~pool['drafted']]
     bonus = pd.Series(0.0, index=undrafted.index)
     slots = [
@@ -784,7 +785,11 @@ def compute_weekly_lineup_bonus(pool: pd.DataFrame, weekly_points: pd.DataFrame,
         for _ in range(count)
     ]
     roster_points = weekly_points.reindex(my_roster.index)
+    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
+    total_weight = 0.0
     for week in weekly_points.columns:
+        weight = playoff_weight if playoff_week_start is not None and week >= playoff_week_start else 1.0
+        total_weight += weight
         scores = roster_points[week] if week in roster_points else pd.Series(dtype=float)
         baseline = _best_lineup_score(my_roster['position'], scores, slots)
         without_slot = [
@@ -801,10 +806,10 @@ def compute_weekly_lineup_bonus(pool: pd.DataFrame, weekly_points: pd.DataFrame,
             ]
             if eligible_scores:
                 candidate_index = undrafted.index[undrafted['position'] == position]
-                bonus.loc[candidate_index] += np.maximum(
+                bonus.loc[candidate_index] += weight * np.maximum(
                     0.0, candidate_scores.loc[candidate_index] +
                     max(eligible_scores) - baseline)
-    return bonus / max(len(weekly_points.columns), 1)
+    return bonus / max(total_weight, 1.0)
 
 
 def _on_clock_slot(draft: dict, pick_no: int) -> int:
@@ -954,8 +959,9 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     pool = pool.assign(
         bb_vorp=compute_bb_vorp(pool, next_pick_number).reindex(pool.index))
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
+    playoff_week_start = data.draft.get('settings', {}).get('playoff_week_start')
     weekly_lineup_bonus = compute_weekly_lineup_bonus(
-        pool, weekly_points, my_roster, settings)
+        pool, weekly_points, my_roster, settings, playoff_week_start)
     personal_score = compute_personal_score(pool, pool['bb_vorp'], my_roster) + weekly_lineup_bonus
     pool = pool.assign(
         weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
