@@ -7,8 +7,7 @@ from streamlit_app import (
     compute_weekly_lineup_bonus,
     effective_position_needs,
     is_users_turn,
-    picks_until_current_turn,
-    players_available_at_next_pick,
+    next_user_pick_number,
     DraftData,
     DraftSettings,
     PositionDemand,
@@ -151,18 +150,17 @@ def test_position_demand_uses_league_starter_demand():
     assert demand.loc['QB', 'total_viable'] == 24
 
 
-def test_compute_bb_vorp_uses_players_available_at_next_pick():
+def test_compute_bb_vorp_uses_earliest_position_adp_after_next_pick():
     pool = build_pool({
         'qb_now': {'position': 'QB', 'ceiling_90': 30, 'adp': 1, 'drafted': False},
-        'qb_next': {'position': 'QB', 'ceiling_90': 20, 'adp': 4, 'drafted': False},
+        'qb_replacement': {'position': 'QB', 'ceiling_90': 20, 'adp': 4, 'drafted': False},
+        'qb_later': {'position': 'QB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
         'rb_now': {'position': 'RB', 'ceiling_90': 26, 'adp': 2, 'drafted': False},
-        'rb_next': {'position': 'RB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
+        'rb_replacement': {'position': 'RB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
     })
 
-    next_pick_pool = players_available_at_next_pick(pool, picks_until_next_pick=2)
-    vorp = compute_bb_vorp(pool, next_pick_pool)
+    vorp = compute_bb_vorp(pool, next_pick_number=3)
 
-    assert set(next_pick_pool.index) == {'qb_next', 'rb_next'}
     assert vorp['qb_now'] == pytest.approx(10)
     assert vorp['rb_now'] == pytest.approx(1)
 
@@ -216,16 +214,16 @@ def test_is_users_turn_unknown_user_is_false():
         'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
     }
     assert is_users_turn(draft, 0, 'ghost') is False
-def test_picks_until_current_turn_uses_snake_turn_order():
+def test_next_user_pick_number_uses_snake_turn_order():
     draft = {
         'type': 'snake',
         'settings': {'teams': 4},
         'draft_order': {'u1': 1, 'u2': 2, 'u3': 3, 'u4': 4},
     }
 
-    assert picks_until_current_turn(draft, 0) == 6
-    assert picks_until_current_turn(draft, 1) == 4
-    assert picks_until_current_turn(draft, 3) == 0
+    assert next_user_pick_number(draft, 0, 'u1') == 1
+    assert next_user_pick_number(draft, 0, 'u2') == 2
+    assert next_user_pick_number(draft, 1, 'u1') == 8
 
 
 
