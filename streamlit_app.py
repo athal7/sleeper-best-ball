@@ -702,20 +702,10 @@ def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
 
 
 
-BYE_OVERLAP_DECAY = 0.15  # per already-owned same-position/same-bye player
 
 
-def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
-                           my_roster: pd.DataFrame) -> pd.Series:
-    bye_counts = my_roster.groupby(['position', 'bye_week']).size()
-
-    undrafted = pool[~pool['drafted']]
-    overlap_keys = pd.MultiIndex.from_arrays([undrafted['position'], undrafted['bye_week']])
-    overlap = pd.Series(
-        bye_counts.reindex(overlap_keys).fillna(0).to_numpy(), index=undrafted.index)
-    bye_discount = 1.0 / (1 + BYE_OVERLAP_DECAY * overlap)
-
-    return bb_vorp.reindex(undrafted.index) * bye_discount
+def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series) -> pd.Series:
+    return bb_vorp.reindex(pool.index[~pool['drafted']])
 
 def _best_lineup_score(positions: pd.Series, scores: pd.Series,
                        slots: list[str]) -> float:
@@ -916,8 +906,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     playoff_week_start = data.draft.get('settings', {}).get('playoff_week_start')
     weekly_lineup_bonus = compute_weekly_lineup_bonus(
         pool, weekly_points, my_roster, settings, playoff_week_start)
-    personal_score = compute_personal_score(
-        pool, pool['bb_vorp'], my_roster) + weekly_lineup_bonus
+    personal_score = compute_personal_score(pool, pool['bb_vorp']) + weekly_lineup_bonus
     pool = pool.assign(
         weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
         personal_score=personal_score.reindex(pool.index))

@@ -312,48 +312,27 @@ def test_compute_personal_score_has_no_position_target_boost():
     bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
     my_roster = pd.DataFrame(columns=['position', 'bye_week'])
 
-    score = compute_personal_score(pool, bb_vorp, my_roster)
+    score = compute_personal_score(pool, bb_vorp)
 
     assert score['rb1'] == pytest.approx(10.0)
     assert score['wr1'] == pytest.approx(10.0)
 
 
 
-def test_compute_personal_score_discounts_bye_week_stacking():
+def test_compute_personal_score_ignores_bye_week_stacking():
     pool = pd.DataFrame.from_dict({
         'wr_same_bye': {'position': 'WR', 'drafted': False, 'bye_week': 7},
         'wr_diff_bye': {'position': 'WR', 'drafted': False, 'bye_week': 11},
     }, orient='index')
     bb_vorp = pd.Series({'wr_same_bye': 10.0, 'wr_diff_bye': 10.0})
-    my_roster = pd.DataFrame.from_dict({
-        'wr_owned_1': {'position': 'WR', 'bye_week': 7},
-        'wr_owned_2': {'position': 'WR', 'bye_week': 7},
-    }, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_roster)
+    score = compute_personal_score(pool, bb_vorp)
 
+    assert score['wr_same_bye'] == pytest.approx(10.0)
     assert score['wr_diff_bye'] == pytest.approx(10.0)
-    assert score['wr_same_bye'] == pytest.approx(10.0 / (1 + 0.15 * 2))
-    assert score['wr_same_bye'] < score['wr_diff_bye']
 
 
 
-def test_compute_personal_score_ignores_position_saturation():
-    pool = pd.DataFrame.from_dict({
-        'qb4': {'position': 'QB', 'drafted': False, 'bye_week': 5},
-        'rb1': {'position': 'RB', 'drafted': False, 'bye_week': 5},
-    }, orient='index')
-    bb_vorp = pd.Series({'qb4': 10.0, 'rb1': 10.0})
-    my_roster = pd.DataFrame.from_dict({
-        'qb1': {'position': 'QB', 'bye_week': 8},
-        'qb2': {'position': 'QB', 'bye_week': 9},
-        'qb3': {'position': 'QB', 'bye_week': 10},
-    }, orient='index')
-
-    score = compute_personal_score(pool, bb_vorp, my_roster)
-
-    assert score['qb4'] == pytest.approx(10.0)
-    assert score['rb1'] == pytest.approx(10.0)
 
 
 def test_build_my_roster_includes_picks_outside_recommendation_pool(monkeypatch):
