@@ -411,6 +411,10 @@ def test_get_user_drafts_returns_id_and_drafts(monkeypatch):
     assert user_id == 'uid-1'
     assert drafts == [{'draft_id': 'd1', 'status': 'drafting'}]
 
+def _standard_settings():
+    return DraftSettings(teams=12, slots={
+        'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1})
+
 
 def test_compute_personal_score_has_no_position_target_boost():
     pool = pd.DataFrame.from_dict({
@@ -420,7 +424,7 @@ def test_compute_personal_score_has_no_position_target_boost():
     bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
     my_roster = pd.DataFrame(columns=['position', 'bye_week'])
 
-    score = compute_personal_score(pool, bb_vorp, my_roster)
+    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
 
     assert score['rb1'] == pytest.approx(10.0)
     assert score['wr1'] == pytest.approx(10.0)
@@ -438,13 +442,35 @@ def test_compute_personal_score_discounts_bye_week_stacking():
         'wr_owned_2': {'position': 'WR', 'bye_week': 7},
     }, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_roster)
+    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
 
     assert score['wr_diff_bye'] == pytest.approx(10.0)
     assert score['wr_same_bye'] == pytest.approx(10.0 / (1 + 0.15 * 2))
     assert score['wr_same_bye'] < score['wr_diff_bye']
 
 
+
+def test_compute_personal_score_discounts_position_saturation():
+    # 3 QBs owned; starter capacity for QB is 2 (QB + SUPER_FLEX).
+    # A 4th QB (excess=1) gets discounted, a QB with excess=0 does not.
+    pool = pd.DataFrame.from_dict({
+        'qb4': {'position': 'QB', 'drafted': False, 'bye_week': 5},
+        'rb1': {'position': 'RB', 'drafted': False, 'bye_week': 5},
+    }, orient='index')
+    bb_vorp = pd.Series({'qb4': 10.0, 'rb1': 10.0})
+    my_roster = pd.DataFrame.from_dict({
+        'qb1': {'position': 'QB', 'bye_week': 8},
+        'qb2': {'position': 'QB', 'bye_week': 9},
+        'qb3': {'position': 'QB', 'bye_week': 10},
+    }, orient='index')
+
+    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
+
+    # QB capacity = 2, owned = 3, excess = 1 → discount = 1/(1+2.0*1) = 1/3
+    assert score['qb4'] == pytest.approx(10.0 / 3.0)
+    # RB with empty roster at RB: no saturation, no bye overlap → full VORP
+    assert score['rb1'] == pytest.approx(10.0)
+    assert score['qb4'] < score['rb1']
 def test_build_my_roster_includes_picks_outside_recommendation_pool(monkeypatch):
     from streamlit_app import Data, build_my_roster
 
