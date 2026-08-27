@@ -714,8 +714,10 @@ def _best_lineup_score(positions: pd.Series, scores: pd.Series,
     return max(states.values(), default=0.0)
 
 
-def compute_lineup_uplift(pool: pd.DataFrame, my_roster: pd.DataFrame,
-                           settings: DraftSettings) -> pd.Series:
+def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
+                           my_roster: pd.DataFrame, settings: DraftSettings,
+                           playoff_week_start: int | None = None) -> pd.Series:
+    """Aggregate weekly lineup value from upside inputs or base projections."""
     undrafted = pool[~pool['drafted']]
     uplift = pd.Series(0.0, index=undrafted.index)
     slots = [
@@ -723,26 +725,34 @@ def compute_lineup_uplift(pool: pd.DataFrame, my_roster: pd.DataFrame,
         for slot, count in settings.slots.items()
         for _ in range(count)
     ]
-    roster_scores = pool['p90_weekly'].reindex(my_roster.index)
-    baseline = _best_lineup_score(my_roster['position'], roster_scores, slots)
-    without_slot = [
-        _best_lineup_score(
-            my_roster['position'], roster_scores, slots[:index] + slots[index + 1:])
-        for index in range(len(slots))
-    ]
-    candidate_scores = undrafted['p90_weekly'].fillna(0.0)
-    for position in undrafted['position'].unique():
-        eligible_scores = [
-            without_slot[index]
-            for index, slot in enumerate(slots)
-            if position in SLOT_ELIGIBILITY[slot]
+    roster_scores = weekly_points.reindex(my_roster.index)
+    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
+    total_weight = 0.0
+    for week in weekly_points.columns:
+        weight = (playoff_weight
+                  if playoff_week_start is not None and week >= playoff_week_start
+                  else 1.0)
+        total_weight += weight
+        scores = roster_scores[week] if week in roster_scores else pd.Series(dtype=float)
+        baseline = _best_lineup_score(my_roster['position'], scores, slots)
+        without_slot = [
+            _best_lineup_score(
+                my_roster['position'], scores, slots[:index] + slots[index + 1:])
+            for index in range(len(slots))
         ]
-        if eligible_scores:
-            candidate_index = undrafted.index[undrafted['position'] == position]
-            uplift.loc[candidate_index] = np.maximum(
-                0.0, candidate_scores.loc[candidate_index] +
-                max(eligible_scores) - baseline)
-    return uplift
+        candidate_scores = weekly_points[week].reindex(undrafted.index).fillna(0.0)
+        for position in undrafted['position'].unique():
+            eligible_scores = [
+                without_slot[index]
+                for index, slot in enumerate(slots)
+                if position in SLOT_ELIGIBILITY[slot]
+            ]
+            if eligible_scores:
+                candidate_index = undrafted.index[undrafted['position'] == position]
+                uplift.loc[candidate_index] += weight * np.maximum(
+                    0.0, candidate_scores.loc[candidate_index] +
+                    max(eligible_scores) - baseline)
+    return uplift / max(total_weight, 1.0)
 
 
 def compute_lineup_vorp(pool: pd.DataFrame, lineup_uplift: pd.Series,
@@ -888,6 +898,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     settings = DraftSettings.from_draft(data.draft)
     scoring = fetch_draft_scoring(data.draft.get('league_id'))
     season = int(data.draft.get('season') or sleeper.get_sport_state('nfl')['league_season'])
+    weekly_points, _ = build_projection_inputs(season, scoring)
     projections = build_season_projections(season, scoring)
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
@@ -895,7 +906,9 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
         data.draft, len(data.picks), user_id)
     users_turn = is_users_turn(data.draft, len(data.picks), user_id)
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
-    lineup_uplift = compute_lineup_uplift(pool, my_roster, settings)
+    playoff_week_start = data.draft.get('settings', {}).get('playoff_week_start')
+    lineup_uplift = compute_lineup_uplift(
+        pool, weekly_points, my_roster, settings, playoff_week_start)
     lineup_vorp = compute_lineup_vorp(pool, lineup_uplift, next_pick_number)
     pool = pool.assign(
         lineup_uplift=lineup_uplift.reindex(pool.index).fillna(0.0),

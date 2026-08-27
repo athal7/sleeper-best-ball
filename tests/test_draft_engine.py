@@ -59,40 +59,64 @@ def test_compute_lineup_vorp_uses_replacement_uplift_after_next_pick():
     assert vorp['rb_now'] == pytest.approx(3.0)
 
 
-def test_compute_lineup_uplift_uses_p90_weekly_lineup_value():
+def test_compute_lineup_uplift_uses_each_weekly_prediction():
     settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
     pool = build_pool({
-        'rb_owned': {'position': 'RB', 'p90_weekly': 10.0, 'drafted': True},
-        'wr_owned': {'position': 'WR', 'p90_weekly': 5.0, 'drafted': True},
-        'wr_upgrade': {'position': 'WR', 'p90_weekly': 12.0, 'drafted': False},
-        'qb_ineligible': {'position': 'QB', 'p90_weekly': 20.0, 'drafted': False},
+        'wr_upgrade': {'position': 'WR', 'drafted': False},
+        'qb_ineligible': {'position': 'QB', 'drafted': False},
+    })
+    weekly_upside = pd.DataFrame({
+        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 8.0, 'qb_ineligible': 20.0},
+        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 14.0, 'qb_ineligible': 20.0},
     })
     my_roster = pd.DataFrame.from_dict({
         'rb_owned': {'position': 'RB'},
         'wr_owned': {'position': 'WR'},
     }, orient='index')
 
-    uplift = compute_lineup_uplift(pool, my_roster, settings)
+    uplift = compute_lineup_uplift(pool, weekly_upside, my_roster, settings)
 
-    assert uplift['wr_upgrade'] == pytest.approx(7.0)
+    assert uplift['wr_upgrade'] == pytest.approx(6.0)
     assert uplift['qb_ineligible'] == pytest.approx(0.0)
 
 
 def test_compute_lineup_uplift_values_second_qb_in_superflex():
     settings = DraftSettings(teams=1, slots={'QB': 1, 'SUPER_FLEX': 1})
     pool = build_pool({
-        'qb_owned': {'position': 'QB', 'p90_weekly': 10.0, 'drafted': True},
-        'rb_owned': {'position': 'RB', 'p90_weekly': 8.0, 'drafted': True},
-        'qb_upgrade': {'position': 'QB', 'p90_weekly': 12.0, 'drafted': False},
+        'qb_upgrade': {'position': 'QB', 'drafted': False},
+    })
+    weekly_upside = pd.DataFrame({
+        1: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
+        2: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
     })
     my_roster = pd.DataFrame.from_dict({
         'qb_owned': {'position': 'QB'},
         'rb_owned': {'position': 'RB'},
     }, orient='index')
 
-    uplift = compute_lineup_uplift(pool, my_roster, settings)
+    uplift = compute_lineup_uplift(pool, weekly_upside, my_roster, settings)
 
     assert uplift['qb_upgrade'] == pytest.approx(4.0)
+
+
+def test_compute_lineup_uplift_weights_playoff_weeks():
+    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
+    pool = build_pool({
+        'wr_upgrade': {'position': 'WR', 'drafted': False},
+    })
+    weekly_upside = pd.DataFrame({
+        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 8.0},
+        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 11.0},
+    })
+    my_roster = pd.DataFrame.from_dict({
+        'rb_owned': {'position': 'RB'},
+        'wr_owned': {'position': 'WR'},
+    }, orient='index')
+
+    uplift = compute_lineup_uplift(
+        pool, weekly_upside, my_roster, settings, playoff_week_start=2)
+
+    assert uplift['wr_upgrade'] == pytest.approx(4.8)
 
 
 
