@@ -650,14 +650,12 @@ def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, p
 @st.cache_data(ttl=METADATA_TTL)
 def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
     weekly, adp = build_projection_inputs(season, scoring)
-    mean_pts = weekly.sum(axis=1, skipna=True)
     p50_weekly = weekly.median(axis=1, skipna=True)
-    ceiling_90 = (weekly.mean(axis=1, skipna=True) +
+    p90_weekly = (weekly.mean(axis=1, skipna=True) +
                   Z_90TH_PERCENTILE * weekly.std(axis=1, skipna=True).fillna(0.0))
     return pd.DataFrame({
-        'mean_pts': mean_pts,
         'p50_weekly': p50_weekly,
-        'ceiling_90': ceiling_90,
+        'p90_weekly': p90_weekly,
         'adp': adp,
     })
 
@@ -691,21 +689,12 @@ def build_my_roster(picks: list[dict], user_id: str, bye_weeks: dict[str, int]) 
 
 
 
-def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
-    undrafted = pool.loc[~pool['drafted']]
-    replacement_candidates = undrafted.loc[undrafted['adp'].gt(next_pick_number)]
-    replacement = replacement_candidates.loc[
-        replacement_candidates.groupby('position')['adp'].idxmin()
-    ].set_index('position')['ceiling_90']
-    return undrafted['ceiling_90'] - undrafted['position'].map(replacement).fillna(0.0)
 
 
 
 
 
 
-def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series) -> pd.Series:
-    return bb_vorp.reindex(pool.index[~pool['drafted']])
 
 def _best_lineup_score(positions: pd.Series, scores: pd.Series,
                        slots: list[str]) -> float:
@@ -725,43 +714,49 @@ def _best_lineup_score(positions: pd.Series, scores: pd.Series,
     return max(states.values(), default=0.0)
 
 
-def compute_weekly_lineup_bonus(pool: pd.DataFrame, weekly_points: pd.DataFrame,
-                                my_roster: pd.DataFrame,
-                                settings: DraftSettings,
-                                playoff_week_start: int | None = None) -> pd.Series:
+def compute_lineup_uplift(pool: pd.DataFrame, my_roster: pd.DataFrame,
+                           settings: DraftSettings) -> pd.Series:
     undrafted = pool[~pool['drafted']]
-    bonus = pd.Series(0.0, index=undrafted.index)
+    uplift = pd.Series(0.0, index=undrafted.index)
     slots = [
         slot
         for slot, count in settings.slots.items()
         for _ in range(count)
     ]
-    roster_points = weekly_points.reindex(my_roster.index)
-    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
-    total_weight = 0.0
-    for week in weekly_points.columns:
-        weight = playoff_weight if playoff_week_start is not None and week >= playoff_week_start else 1.0
-        total_weight += weight
-        scores = roster_points[week] if week in roster_points else pd.Series(dtype=float)
-        baseline = _best_lineup_score(my_roster['position'], scores, slots)
-        without_slot = [
-            _best_lineup_score(
-                my_roster['position'], scores, slots[:index] + slots[index + 1:])
-            for index in range(len(slots))
+    roster_scores = pool['p90_weekly'].reindex(my_roster.index)
+    baseline = _best_lineup_score(my_roster['position'], roster_scores, slots)
+    without_slot = [
+        _best_lineup_score(
+            my_roster['position'], roster_scores, slots[:index] + slots[index + 1:])
+        for index in range(len(slots))
+    ]
+    candidate_scores = undrafted['p90_weekly'].fillna(0.0)
+    for position in undrafted['position'].unique():
+        eligible_scores = [
+            without_slot[index]
+            for index, slot in enumerate(slots)
+            if position in SLOT_ELIGIBILITY[slot]
         ]
-        candidate_scores = weekly_points[week].reindex(undrafted.index).fillna(0.0)
-        for position in undrafted['position'].unique():
-            eligible_scores = [
-                without_slot[index]
-                for index, slot in enumerate(slots)
-                if position in SLOT_ELIGIBILITY[slot]
-            ]
-            if eligible_scores:
-                candidate_index = undrafted.index[undrafted['position'] == position]
-                bonus.loc[candidate_index] += weight * np.maximum(
-                    0.0, candidate_scores.loc[candidate_index] +
-                    max(eligible_scores) - baseline)
-    return bonus / max(total_weight, 1.0)
+        if eligible_scores:
+            candidate_index = undrafted.index[undrafted['position'] == position]
+            uplift.loc[candidate_index] = np.maximum(
+                0.0, candidate_scores.loc[candidate_index] +
+                max(eligible_scores) - baseline)
+    return uplift
+
+
+def compute_lineup_vorp(pool: pd.DataFrame, lineup_uplift: pd.Series,
+                        next_pick_number: int) -> pd.Series:
+    undrafted = pool.loc[~pool['drafted']]
+    replacement_candidates = undrafted.loc[undrafted['adp'].gt(next_pick_number)]
+    replacements = replacement_candidates.loc[
+        replacement_candidates.groupby('position')['adp'].idxmin()
+    ]
+    replacement_uplift = pd.Series(
+        lineup_uplift.reindex(replacements.index).to_numpy(),
+        index=replacements['position'])
+    return (lineup_uplift.reindex(undrafted.index) -
+            undrafted['position'].map(replacement_uplift).fillna(0.0))
 
 
 def _on_clock_slot(draft: dict, pick_no: int) -> int:
@@ -876,13 +871,13 @@ def render_my_roster(my_roster: pd.DataFrame):
 def render_recommendations(pool: pd.DataFrame):
     st.subheader("Top 5 Recommendations")
     top5 = pool[~pool['drafted']].sort_values(
-        ['personal_score', 'ceiling_90'], ascending=False).head(5).copy()
+        ['lineup_vorp', 'p90_weekly'], ascending=False).head(5).copy()
     top5['name'] = top5['first_name'] + ' ' + top5['last_name']
-    display = top5[['name', 'position', 'team', 'p50_weekly', 'ceiling_90',
-                    'bb_vorp', 'weekly_lineup_bonus', 'personal_score']]
+    display = top5[['name', 'position', 'team', 'p50_weekly', 'p90_weekly',
+                    'lineup_uplift', 'lineup_vorp']]
     styled = display.style.format({
-        'p50_weekly': '{:.1f}', 'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}',
-        'weekly_lineup_bonus': '{:.1f}', 'personal_score': '{:.1f}',
+        'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}',
+        'lineup_uplift': '{:.1f}', 'lineup_vorp': '{:.1f}',
     })
     st.dataframe(styled, hide_index=True)
 
@@ -893,28 +888,23 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     settings = DraftSettings.from_draft(data.draft)
     scoring = fetch_draft_scoring(data.draft.get('league_id'))
     season = int(data.draft.get('season') or sleeper.get_sport_state('nfl')['league_season'])
-    weekly_points, _ = build_projection_inputs(season, scoring)
     projections = build_season_projections(season, scoring)
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
     next_pick_number = next_user_pick_number(
         data.draft, len(data.picks), user_id)
     users_turn = is_users_turn(data.draft, len(data.picks), user_id)
-    pool = pool.assign(
-        bb_vorp=compute_bb_vorp(pool, next_pick_number).reindex(pool.index))
     my_roster = build_my_roster(data.picks, user_id, bye_weeks)
-    playoff_week_start = data.draft.get('settings', {}).get('playoff_week_start')
-    weekly_lineup_bonus = compute_weekly_lineup_bonus(
-        pool, weekly_points, my_roster, settings, playoff_week_start)
-    personal_score = compute_personal_score(pool, pool['bb_vorp']) + weekly_lineup_bonus
+    lineup_uplift = compute_lineup_uplift(pool, my_roster, settings)
+    lineup_vorp = compute_lineup_vorp(pool, lineup_uplift, next_pick_number)
     pool = pool.assign(
-        weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
-        personal_score=personal_score.reindex(pool.index))
+        lineup_uplift=lineup_uplift.reindex(pool.index).fillna(0.0),
+        lineup_vorp=lineup_vorp.reindex(pool.index))
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock · refreshes every {DRAFT_TTL}s")
     st.caption(
-        f"VORP compares each player with the first same-position ADP after "
-        f"your next pick (Pick {next_pick_number}).")
+        f"VORP compares each player's lineup uplift with the first same-position "
+        f"ADP after your next pick (Pick {next_pick_number}).")
     if users_turn:
         st.success("It's your turn!")
     else:

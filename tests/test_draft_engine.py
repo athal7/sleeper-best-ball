@@ -1,9 +1,8 @@
 import pandas as pd
 import pytest
 from streamlit_app import (
-    compute_bb_vorp,
-    compute_personal_score,
-    compute_weekly_lineup_bonus,
+    compute_lineup_uplift,
+    compute_lineup_vorp,
     is_users_turn,
     next_user_pick_number,
     DraftData,
@@ -41,107 +40,60 @@ def build_pool(rows: dict) -> pd.DataFrame:
 
 
 
-def test_compute_bb_vorp_uses_earliest_position_adp_after_next_pick():
+def test_compute_lineup_vorp_uses_replacement_uplift_after_next_pick():
     pool = build_pool({
-        'qb_now': {'position': 'QB', 'ceiling_90': 30, 'adp': 1, 'drafted': False},
-        'qb_replacement': {'position': 'QB', 'ceiling_90': 20, 'adp': 4, 'drafted': False},
-        'qb_later': {'position': 'QB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
-        'rb_now': {'position': 'RB', 'ceiling_90': 26, 'adp': 2, 'drafted': False},
-        'rb_replacement': {'position': 'RB', 'ceiling_90': 25, 'adp': 6, 'drafted': False},
+        'qb_now': {'position': 'QB', 'adp': 1, 'drafted': False},
+        'qb_replacement': {'position': 'QB', 'adp': 4, 'drafted': False},
+        'qb_later': {'position': 'QB', 'adp': 6, 'drafted': False},
+        'rb_now': {'position': 'RB', 'adp': 2, 'drafted': False},
+        'rb_replacement': {'position': 'RB', 'adp': 6, 'drafted': False},
+    })
+    uplift = pd.Series({
+        'qb_now': 10.0, 'qb_replacement': 3.0, 'qb_later': 7.0,
+        'rb_now': 8.0, 'rb_replacement': 5.0,
     })
 
-    vorp = compute_bb_vorp(pool, next_pick_number=3)
+    vorp = compute_lineup_vorp(pool, uplift, next_pick_number=3)
 
-    assert vorp['qb_now'] == pytest.approx(10)
-    assert vorp['rb_now'] == pytest.approx(1)
+    assert vorp['qb_now'] == pytest.approx(7.0)
+    assert vorp['rb_now'] == pytest.approx(3.0)
 
-def test_weekly_lineup_bonus_rewards_players_who_improve_starting_lineups():
+
+def test_compute_lineup_uplift_uses_p90_weekly_lineup_value():
     settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
     pool = build_pool({
-        'wr_upgrade': {'position': 'WR', 'drafted': False},
-        'qb_ineligible': {'position': 'QB', 'drafted': False},
-    })
-    weekly_points = pd.DataFrame({
-        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
-        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
+        'rb_owned': {'position': 'RB', 'p90_weekly': 10.0, 'drafted': True},
+        'wr_owned': {'position': 'WR', 'p90_weekly': 5.0, 'drafted': True},
+        'wr_upgrade': {'position': 'WR', 'p90_weekly': 12.0, 'drafted': False},
+        'qb_ineligible': {'position': 'QB', 'p90_weekly': 20.0, 'drafted': False},
     })
     my_roster = pd.DataFrame.from_dict({
         'rb_owned': {'position': 'RB'},
         'wr_owned': {'position': 'WR'},
     }, orient='index')
 
-    bonus = compute_weekly_lineup_bonus(pool, weekly_points, my_roster, settings)
+    uplift = compute_lineup_uplift(pool, my_roster, settings)
 
-    assert bonus['wr_upgrade'] == pytest.approx(7.0)
-    assert bonus['qb_ineligible'] == pytest.approx(0.0)
+    assert uplift['wr_upgrade'] == pytest.approx(7.0)
+    assert uplift['qb_ineligible'] == pytest.approx(0.0)
 
-def test_weekly_lineup_bonus_values_second_qb_in_superflex():
+
+def test_compute_lineup_uplift_values_second_qb_in_superflex():
     settings = DraftSettings(teams=1, slots={'QB': 1, 'SUPER_FLEX': 1})
     pool = build_pool({
-        'qb_upgrade': {'position': 'QB', 'drafted': False},
-    })
-    weekly_points = pd.DataFrame({
-        1: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
-        2: {'qb_owned': 10.0, 'rb_owned': 8.0, 'qb_upgrade': 12.0},
+        'qb_owned': {'position': 'QB', 'p90_weekly': 10.0, 'drafted': True},
+        'rb_owned': {'position': 'RB', 'p90_weekly': 8.0, 'drafted': True},
+        'qb_upgrade': {'position': 'QB', 'p90_weekly': 12.0, 'drafted': False},
     })
     my_roster = pd.DataFrame.from_dict({
         'qb_owned': {'position': 'QB'},
         'rb_owned': {'position': 'RB'},
     }, orient='index')
 
-    bonus = compute_weekly_lineup_bonus(pool, weekly_points, my_roster, settings)
+    uplift = compute_lineup_uplift(pool, my_roster, settings)
 
+    assert uplift['qb_upgrade'] == pytest.approx(4.0)
 
-def test_weekly_lineup_bonus_weights_playoff_weeks_heavier():
-    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
-    pool = build_pool({
-        'wr_upgrade': {'position': 'WR', 'drafted': False},
-        'qb_ineligible': {'position': 'QB', 'drafted': False},
-    })
-    weekly_points = pd.DataFrame({
-        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
-        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 12.0, 'qb_ineligible': 20.0},
-    })
-    my_roster = pd.DataFrame.from_dict({
-        'rb_owned': {'position': 'RB'},
-        'wr_owned': {'position': 'WR'},
-    }, orient='index')
-
-    # Week 2 is a playoff week (1.5x weight).
-    # Each week gives 7.0 improvement, weighted: 1.0*7.0 + 1.5*7.0 = 17.5 / 2.5 = 7.0
-    bonus = compute_weekly_lineup_bonus(
-        pool, weekly_points, my_roster, settings, playoff_week_start=2)
-
-    assert bonus['wr_upgrade'] == pytest.approx(7.0)
-
-def test_weekly_lineup_bonus_playoff_weight_amplifies_playoff_week_improvements():
-    settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
-    pool = build_pool({
-        'wr_upgrade': {'position': 'WR', 'drafted': False},
-    })
-    # Week 1: improvement = 3.0, Week 2 (playoff): improvement = 6.0
-    weekly_points = pd.DataFrame({
-        1: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 8.0},
-        2: {'rb_owned': 10.0, 'wr_owned': 5.0, 'wr_upgrade': 11.0},
-    })
-    my_roster = pd.DataFrame.from_dict({
-        'rb_owned': {'position': 'RB'},
-        'wr_owned': {'position': 'WR'},
-    }, orient='index')
-
-    # Without playoff weighting: (3.0 + 6.0) / 2 = 4.5
-    bonus_no_playoff = compute_weekly_lineup_bonus(
-        pool, weekly_points, my_roster, settings)
-    assert bonus_no_playoff['wr_upgrade'] == pytest.approx(4.5)
-
-    # With playoff weighting (week 2 is 1.5x):
-    # (1.0*3.0 + 1.5*6.0) / (1.0 + 1.5) = (3.0 + 9.0) / 2.5 = 12.0 / 2.5 = 4.8
-    bonus_playoff = compute_weekly_lineup_bonus(
-        pool, weekly_points, my_roster, settings, playoff_week_start=2)
-    assert bonus_playoff['wr_upgrade'] == pytest.approx(4.8)
-
-    # Playoff-weighted bonus > unweighted because playoff week has bigger improvement
-    assert bonus_playoff['wr_upgrade'] > bonus_no_playoff['wr_upgrade']
 
 
 @pytest.mark.parametrize("picks_made,user_id,expected", [
@@ -206,9 +158,9 @@ def test_build_player_pool_end_to_end(monkeypatch):
     monkeypatch.setattr(Data, 'get_players', staticmethod(lambda: sleeper_players))
 
     projections = pd.DataFrame.from_dict({
-        '1': {'mean_pts': 20.0, 'ceiling_90': 30.0, 'adp': 10},
-        '2': {'mean_pts': 15.0, 'ceiling_90': 22.0, 'adp': 20},
-        '3': {'mean_pts': 5.0, 'ceiling_90': 8.0, 'adp': 30},
+        '1': {'p50_weekly': 20.0, 'p90_weekly': 30.0, 'adp': 10},
+        '2': {'p50_weekly': 15.0, 'p90_weekly': 22.0, 'adp': 20},
+        '3': {'p50_weekly': 5.0, 'p90_weekly': 8.0, 'adp': 30},
     }, orient='index')
 
     settings = DraftSettings(teams=2, slots={'QB': 1, 'RB': 1})
@@ -224,8 +176,8 @@ def test_build_player_pool_end_to_end(monkeypatch):
     assert pool.loc['2', 'bye_week'] == 9
 
 
-def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monkeypatch):
-    from streamlit_app import Data, build_season_projections, Z_90TH_PERCENTILE
+def test_build_season_projections_excludes_bye_weeks_from_p90_estimate(monkeypatch):
+    from streamlit_app import Data, build_season_projections
 
     # Player '1' plays weeks 1-3 (10, 10, 10 pts); week 2 is a bye for player '2'
     # (absent from that week's projections) and should not drag down their
@@ -240,12 +192,10 @@ def test_build_season_projections_excludes_bye_weeks_from_mean_and_ceiling(monke
     scoring = {'pass_yd': 0.04, 'rec_yd': 0.1}
     result = build_season_projections(season=2026, scoring=scoring)
 
-    # Player '1': 3 weeks * (250*0.04=10) = 30 total, zero variance -> ceiling == mean-per-week.
-    assert result.loc['1', 'mean_pts'] == pytest.approx(30.0)
-    assert result.loc['1', 'ceiling_90'] == pytest.approx(10.0)
-    # Player '2': only 2 weeks played (week 2 excluded, not counted as 0) -> total = 2 * 5 = 10.
-    assert result.loc['2', 'mean_pts'] == pytest.approx(10.0)
-    assert result.loc['2', 'ceiling_90'] == pytest.approx(5.0)
+    # Player '1': zero variation in weekly predictions yields a P90 of 10.
+    assert result.loc['1', 'p90_weekly'] == pytest.approx(10.0)
+    # Player '2': its bye is excluded from the weekly P90 estimate.
+    assert result.loc['2', 'p90_weekly'] == pytest.approx(5.0)
     assert result.loc['1', 'p50_weekly'] == pytest.approx(10.0)
     assert result.loc['2', 'p50_weekly'] == pytest.approx(5.0)
     assert result.loc['1', 'adp'] == pytest.approx(10.0)
@@ -259,7 +209,7 @@ def test_build_season_projections_skips_empty_weeks(monkeypatch):
     monkeypatch.setattr(Data, 'get_projections', staticmethod(lambda season, week: weekly_stats.get(week, pd.DataFrame())))
 
     result = build_season_projections(season=2026, scoring={'pass_yd': 0.04})
-    assert result.loc['1', 'mean_pts'] == pytest.approx(4.0)
+    assert result.loc['1', 'p90_weekly'] == pytest.approx(4.0)
 
 
 def test_fetch_draft_scoring_uses_real_league_when_linked(monkeypatch):
@@ -304,32 +254,6 @@ def test_get_user_drafts_returns_id_and_drafts(monkeypatch):
     assert drafts == [{'draft_id': 'd1', 'status': 'drafting'}]
 
 
-def test_compute_personal_score_has_no_position_target_boost():
-    pool = pd.DataFrame.from_dict({
-        'rb1': {'position': 'RB', 'drafted': False, 'bye_week': 5},
-        'wr1': {'position': 'WR', 'drafted': False, 'bye_week': 5},
-    }, orient='index')
-    bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
-    my_roster = pd.DataFrame(columns=['position', 'bye_week'])
-
-    score = compute_personal_score(pool, bb_vorp)
-
-    assert score['rb1'] == pytest.approx(10.0)
-    assert score['wr1'] == pytest.approx(10.0)
-
-
-
-def test_compute_personal_score_ignores_bye_week_stacking():
-    pool = pd.DataFrame.from_dict({
-        'wr_same_bye': {'position': 'WR', 'drafted': False, 'bye_week': 7},
-        'wr_diff_bye': {'position': 'WR', 'drafted': False, 'bye_week': 11},
-    }, orient='index')
-    bb_vorp = pd.Series({'wr_same_bye': 10.0, 'wr_diff_bye': 10.0})
-
-    score = compute_personal_score(pool, bb_vorp)
-
-    assert score['wr_same_bye'] == pytest.approx(10.0)
-    assert score['wr_diff_bye'] == pytest.approx(10.0)
 
 
 
