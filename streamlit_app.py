@@ -689,44 +689,6 @@ def build_my_roster(picks: list[dict], user_id: str, bye_weeks: dict[str, int]) 
     return roster
 
 
-class PositionDemand(pd.DataFrame):
-    CLIFF_SEARCH_MIN_RANK = 5
-    CLIFF_SEARCH_MAX_RANK = 60
-    CLIFF_THRESHOLD = 2.0
-
-    def __init__(self, pool: pd.DataFrame, settings: DraftSettings):
-        rows = {}
-        for pos in settings.relevant_positions:
-            own = pool[(pool['position'] == pos) & (pool['mean_pts'] > 0)] \
-                .sort_values('mean_pts', ascending=False)
-            base_total = self._find_replacement_rank(own['mean_pts'].to_numpy())
-            total = base_total
-            viable = own.iloc[:total]
-            undrafted_viable = viable[~viable['drafted']]
-            remaining = len(undrafted_viable)
-            replacement_ceiling = (
-                undrafted_viable.sort_values('mean_pts')['ceiling_90'].iloc[0]
-                if remaining else 0.0
-            )
-            scarcity = total / remaining if remaining else float('inf')
-            rows[pos] = {
-                'total_viable': total,
-                'remaining_viable': remaining,
-                'replacement_ceiling': replacement_ceiling,
-                'scarcity_multiplier': scarcity,
-                'is_cliff': scarcity > self.CLIFF_THRESHOLD,
-            }
-        super().__init__(pd.DataFrame.from_dict(rows, orient='index'))
-
-    @classmethod
-    def _find_replacement_rank(cls, sorted_desc_values: np.ndarray) -> int:
-        n = len(sorted_desc_values)
-        hi = min(cls.CLIFF_SEARCH_MAX_RANK, n - 1)
-        if n < 2 or hi <= cls.CLIFF_SEARCH_MIN_RANK:
-            return n
-        drops = (sorted_desc_values[:-1] - sorted_desc_values[1:]) / sorted_desc_values[:-1]
-        idx = cls.CLIFF_SEARCH_MIN_RANK + int(np.argmax(drops[cls.CLIFF_SEARCH_MIN_RANK:hi]))
-        return idx + 1
 
 
 def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
@@ -741,12 +703,10 @@ def compute_bb_vorp(pool: pd.DataFrame, next_pick_number: int) -> pd.Series:
 
 
 BYE_OVERLAP_DECAY = 0.15  # per already-owned same-position/same-bye player
-POSITION_SATURATION_DECAY = 2.0  # per already-owned player beyond starter capacity
 
 
 def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
-                           my_roster: pd.DataFrame,
-                           settings: DraftSettings) -> pd.Series:
+                           my_roster: pd.DataFrame) -> pd.Series:
     bye_counts = my_roster.groupby(['position', 'bye_week']).size()
 
     undrafted = pool[~pool['drafted']]
@@ -755,18 +715,7 @@ def compute_personal_score(pool: pd.DataFrame, bb_vorp: pd.Series,
         bye_counts.reindex(overlap_keys).fillna(0).to_numpy(), index=undrafted.index)
     bye_discount = 1.0 / (1 + BYE_OVERLAP_DECAY * overlap)
 
-    pos_counts = my_roster.groupby('position').size()
-    capacity = {
-        pos: sum(count for slot, count in settings.slots.items()
-                 if pos in SLOT_ELIGIBILITY[slot])
-        for pos in undrafted['position'].unique()
-    }
-    owned = pos_counts.reindex(undrafted['position']).fillna(0).to_numpy()
-    cap = undrafted['position'].map(capacity).fillna(0).to_numpy()
-    excess = np.maximum(0, owned - cap)
-    sat_discount = 1.0 / (1 + POSITION_SATURATION_DECAY * excess)
-
-    return bb_vorp.reindex(undrafted.index) * bye_discount * sat_discount
+    return bb_vorp.reindex(undrafted.index) * bye_discount
 
 def _best_lineup_score(positions: pd.Series, scores: pd.Series,
                        slots: list[str]) -> float:
@@ -933,25 +882,18 @@ def render_my_roster(my_roster: pd.DataFrame):
     )
 
 
-def _highlight_cliff_row(row: pd.Series) -> list[str]:
-    return ['background-color: #ffcccc' if row['Cliff?'] else ''] * len(row)
 
-
-def render_recommendations(pool: pd.DataFrame, demand: PositionDemand):
+def render_recommendations(pool: pd.DataFrame):
     st.subheader("Top 5 Recommendations")
     top5 = pool[~pool['drafted']].sort_values(
         ['personal_score', 'ceiling_90'], ascending=False).head(5).copy()
     top5['name'] = top5['first_name'] + ' ' + top5['last_name']
-    top5['Cliff?'] = top5['position'].map(demand['is_cliff']).fillna(False)
     display = top5[['name', 'position', 'team', 'p50_weekly', 'ceiling_90',
-                    'bb_vorp', 'weekly_lineup_bonus', 'personal_score', 'Cliff?']]
-    styled = (display.style
-              .apply(_highlight_cliff_row, axis=1)
-              .format({
-                  'p50_weekly': '{:.1f}', 'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}',
-                  'weekly_lineup_bonus': '{:.1f}', 'personal_score': '{:.1f}',
-                  'Cliff?': lambda v: '\U0001f525 Cliff' if v else '',
-              }))
+                    'bb_vorp', 'weekly_lineup_bonus', 'personal_score']]
+    styled = display.style.format({
+        'p50_weekly': '{:.1f}', 'ceiling_90': '{:.1f}', 'bb_vorp': '{:.1f}',
+        'weekly_lineup_bonus': '{:.1f}', 'personal_score': '{:.1f}',
+    })
     st.dataframe(styled, hide_index=True)
 
 
@@ -965,7 +907,6 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     projections = build_season_projections(season, scoring)
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
-    demand = PositionDemand(pool, settings)
     next_pick_number = next_user_pick_number(
         data.draft, len(data.picks), user_id)
     users_turn = is_users_turn(data.draft, len(data.picks), user_id)
@@ -976,7 +917,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     weekly_lineup_bonus = compute_weekly_lineup_bonus(
         pool, weekly_points, my_roster, settings, playoff_week_start)
     personal_score = compute_personal_score(
-        pool, pool['bb_vorp'], my_roster, settings) + weekly_lineup_bonus
+        pool, pool['bb_vorp'], my_roster) + weekly_lineup_bonus
     pool = pool.assign(
         weekly_lineup_bonus=weekly_lineup_bonus.reindex(pool.index).fillna(0.0),
         personal_score=personal_score.reindex(pool.index))
@@ -990,7 +931,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     else:
         st.caption("Not your turn yet — best available shown below anyway.")
     render_my_roster(my_roster)
-    render_recommendations(pool, demand)
+    render_recommendations(pool)
 
 
 def render_draft_assistant(username: str):

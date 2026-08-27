@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import pytest
 from streamlit_app import (
@@ -9,7 +8,6 @@ from streamlit_app import (
     next_user_pick_number,
     DraftData,
     DraftSettings,
-    PositionDemand,
 )
 
 
@@ -41,112 +39,6 @@ def test_draft_settings_from_draft_derives_slots_no_hardcoding():
 def build_pool(rows: dict) -> pd.DataFrame:
     return pd.DataFrame.from_dict(rows, orient='index')
 
-
-class FakeSettings:
-    def __init__(self, relevant_positions, slots=None):
-        self.relevant_positions = set(relevant_positions)
-        self.slots = slots or {}
-
-
-def test_find_replacement_rank_detects_largest_relative_drop(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
-    # Ranks 1-3 (100,90,80) step down ~10-12% each; rank 3->4 (80->20) is a 75%
-    # drop - far larger than any other, so the cliff sits after rank 3.
-    values = np.array([100.0, 90.0, 80.0, 20.0, 18.0, 16.0, 14.0])
-    assert PositionDemand._find_replacement_rank(values) == 3
-
-
-def test_find_replacement_rank_ignores_gaps_outside_search_window(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 3)
-    # The biggest relative drop is actually rank 1->2, but that's below
-    # CLIFF_SEARCH_MIN_RANK (too small a group to call a "cliff") so it's
-    # ignored; the largest drop within the allowed window wins instead.
-    values = np.array([100.0, 5.0, 4.8, 4.6, 1.0, 0.9])
-    assert PositionDemand._find_replacement_rank(values) == 4
-
-
-def test_position_demand_excludes_zero_production_players(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
-    pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 100, 'ceiling_90': 120, 'drafted': False},
-        'te2': {'position': 'TE', 'mean_pts': 90, 'ceiling_90': 110, 'drafted': False},
-        'te3': {'position': 'TE', 'mean_pts': 80, 'ceiling_90': 100, 'drafted': False},
-        'te4': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 30, 'drafted': False},
-        **{f'te_zero{i}': {'position': 'TE', 'mean_pts': 0.0, 'ceiling_90': 0.0, 'drafted': False}
-           for i in range(20)},
-    })
-    demand = PositionDemand(pool, FakeSettings({'TE'}, slots={}))
-    # The cliff (100,90,80 -> 20, a 75% relative drop) sits at rank 3; a flood of
-    # zero-production players is excluded entirely and never distorts this.
-    assert demand.loc['TE', 'total_viable'] == 3
-
-
-def test_position_demand_scarcity_and_remaining(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
-    pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 100, 'ceiling_90': 120, 'drafted': True},
-        'te2': {'position': 'TE', 'mean_pts': 90, 'ceiling_90': 110, 'drafted': False},
-        'te3': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 30, 'drafted': False},
-    })
-    demand = PositionDemand(pool, FakeSettings({'TE'}, slots={}))
-
-    assert demand.loc['TE', 'total_viable'] == 2      # te1, te2 clear the cliff; te3 doesn't
-    assert demand.loc['TE', 'remaining_viable'] == 1  # te1 already drafted
-    assert demand.loc['TE', 'replacement_ceiling'] == pytest.approx(110)
-    assert demand.loc['TE', 'scarcity_multiplier'] == pytest.approx(2.0)
-    assert bool(demand.loc['TE', 'is_cliff']) is False  # strictly > 2.0, not >=
-
-
-def test_position_demand_cliff_when_position_exhausted(monkeypatch):
-    monkeypatch.setattr(PositionDemand, 'CLIFF_SEARCH_MIN_RANK', 1)
-    pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 100, 'ceiling_90': 120, 'drafted': True},
-        'te2': {'position': 'TE', 'mean_pts': 90, 'ceiling_90': 110, 'drafted': True},
-        'te3': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 30, 'drafted': False},
-    })
-    demand = PositionDemand(pool, FakeSettings({'TE'}, slots={}))
-
-    assert demand.loc['TE', 'remaining_viable'] == 0
-    assert demand.loc['TE', 'replacement_ceiling'] == pytest.approx(0.0)
-    assert demand.loc['TE', 'scarcity_multiplier'] == float('inf')
-    assert bool(demand.loc['TE', 'is_cliff']) is True
-
-
-def test_position_demand_is_stable_regardless_of_other_positions_talent():
-    # A different position's talent curve must never change this position's
-    # viable-tier cutoff - each position is ranked strictly against its own
-    # population, never in competition with another position.
-    settings = FakeSettings({'TE', 'RB'})
-    sparse_rb_pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 28, 'drafted': False},
-        'rb1': {'position': 'RB', 'mean_pts': 5, 'ceiling_90': 8, 'drafted': False},
-    })
-    loaded_rb_pool = build_pool({
-        'te1': {'position': 'TE', 'mean_pts': 20, 'ceiling_90': 28, 'drafted': False},
-        'rb1': {'position': 'RB', 'mean_pts': 500, 'ceiling_90': 800, 'drafted': False},
-    })
-
-    demand_sparse = PositionDemand(sparse_rb_pool, settings)
-    demand_loaded = PositionDemand(loaded_rb_pool, settings)
-
-    assert demand_sparse.loc['TE', 'total_viable'] == demand_loaded.loc['TE', 'total_viable']
-    assert demand_sparse.loc['TE', 'replacement_ceiling'] == demand_loaded.loc['TE', 'replacement_ceiling']
-
-
-def test_position_demand_uses_projection_tier_not_league_slots():
-    pool = build_pool({
-        f'qb{i}': {
-            'position': 'QB',
-            'mean_pts': 100 - i if i < 6 else 20 - i / 10,
-            'ceiling_90': 120 - i,
-            'drafted': False,
-        }
-        for i in range(40)
-    })
-    demand = PositionDemand(
-        pool, DraftSettings(teams=12, slots={'QB': 1, 'SUPER_FLEX': 1}))
-
-    assert demand.loc['QB', 'total_viable'] == 6
 
 
 def test_compute_bb_vorp_uses_earliest_position_adp_after_next_pick():
@@ -411,10 +303,6 @@ def test_get_user_drafts_returns_id_and_drafts(monkeypatch):
     assert user_id == 'uid-1'
     assert drafts == [{'draft_id': 'd1', 'status': 'drafting'}]
 
-def _standard_settings():
-    return DraftSettings(teams=12, slots={
-        'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1, 'SUPER_FLEX': 1})
-
 
 def test_compute_personal_score_has_no_position_target_boost():
     pool = pd.DataFrame.from_dict({
@@ -424,7 +312,7 @@ def test_compute_personal_score_has_no_position_target_boost():
     bb_vorp = pd.Series({'rb1': 10.0, 'wr1': 10.0})
     my_roster = pd.DataFrame(columns=['position', 'bye_week'])
 
-    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
+    score = compute_personal_score(pool, bb_vorp, my_roster)
 
     assert score['rb1'] == pytest.approx(10.0)
     assert score['wr1'] == pytest.approx(10.0)
@@ -442,7 +330,7 @@ def test_compute_personal_score_discounts_bye_week_stacking():
         'wr_owned_2': {'position': 'WR', 'bye_week': 7},
     }, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
+    score = compute_personal_score(pool, bb_vorp, my_roster)
 
     assert score['wr_diff_bye'] == pytest.approx(10.0)
     assert score['wr_same_bye'] == pytest.approx(10.0 / (1 + 0.15 * 2))
@@ -450,9 +338,7 @@ def test_compute_personal_score_discounts_bye_week_stacking():
 
 
 
-def test_compute_personal_score_discounts_position_saturation():
-    # 3 QBs owned; starter capacity for QB is 2 (QB + SUPER_FLEX).
-    # A 4th QB (excess=1) gets discounted, a QB with excess=0 does not.
+def test_compute_personal_score_ignores_position_saturation():
     pool = pd.DataFrame.from_dict({
         'qb4': {'position': 'QB', 'drafted': False, 'bye_week': 5},
         'rb1': {'position': 'RB', 'drafted': False, 'bye_week': 5},
@@ -464,13 +350,12 @@ def test_compute_personal_score_discounts_position_saturation():
         'qb3': {'position': 'QB', 'bye_week': 10},
     }, orient='index')
 
-    score = compute_personal_score(pool, bb_vorp, my_roster, _standard_settings())
+    score = compute_personal_score(pool, bb_vorp, my_roster)
 
-    # QB capacity = 2, owned = 3, excess = 1 → discount = 1/(1+2.0*1) = 1/3
-    assert score['qb4'] == pytest.approx(10.0 / 3.0)
-    # RB with empty roster at RB: no saturation, no bye overlap → full VORP
+    assert score['qb4'] == pytest.approx(10.0)
     assert score['rb1'] == pytest.approx(10.0)
-    assert score['qb4'] < score['rb1']
+
+
 def test_build_my_roster_includes_picks_outside_recommendation_pool(monkeypatch):
     from streamlit_app import Data, build_my_roster
 
