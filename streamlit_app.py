@@ -755,18 +755,56 @@ def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
     return uplift / max(total_weight, 1.0)
 
 
+SCARCITY_WEIGHT = 1.0  # per-point erosion in replacement value one round later
+UPSIDE_WEIGHT = 0.15    # per-point gap between a player's P90 and P50 week
+
+
+def compute_replacement_level(pool: pd.DataFrame, lineup_uplift: pd.Series,
+                              pick_number: int) -> pd.Series:
+    """Best lineup_uplift available at each position among undrafted players
+    not yet on the board (ADP after pick_number) - what you could still get."""
+    undrafted = pool.loc[~pool['drafted']]
+    candidates = undrafted.loc[undrafted['adp'].gt(pick_number)]
+    if candidates.empty:
+        return pd.Series(dtype=float)
+    replacements = candidates.loc[candidates.groupby('position')['adp'].idxmin()]
+    return pd.Series(
+        lineup_uplift.reindex(replacements.index).to_numpy(),
+        index=replacements['position'])
+
+
 def compute_lineup_vorp(pool: pd.DataFrame, lineup_uplift: pd.Series,
                         next_pick_number: int) -> pd.Series:
     undrafted = pool.loc[~pool['drafted']]
-    replacement_candidates = undrafted.loc[undrafted['adp'].gt(next_pick_number)]
-    replacements = replacement_candidates.loc[
-        replacement_candidates.groupby('position')['adp'].idxmin()
-    ]
-    replacement_uplift = pd.Series(
-        lineup_uplift.reindex(replacements.index).to_numpy(),
-        index=replacements['position'])
+    replacement = compute_replacement_level(pool, lineup_uplift, next_pick_number)
     return (lineup_uplift.reindex(undrafted.index) -
-            undrafted['position'].map(replacement_uplift).fillna(0.0))
+            undrafted['position'].map(replacement).fillna(0.0))
+
+
+def compute_position_scarcity(pool: pd.DataFrame, lineup_uplift: pd.Series,
+                              next_pick_number: int, teams: int) -> pd.Series:
+    """Per-position value lost by waiting one more full round: how fast the
+    replacement tier is drying up. Positive means a run risk worth reaching for now."""
+    rep_now = compute_replacement_level(pool, lineup_uplift, next_pick_number)
+    rep_later = compute_replacement_level(pool, lineup_uplift, next_pick_number + teams)
+    common = rep_now.index.intersection(rep_later.index)
+    return (rep_now.reindex(common) - rep_later.reindex(common)).clip(lower=0.0)
+
+
+def compute_upside_bonus(pool: pd.DataFrame) -> pd.Series:
+    """Ceiling above a typical week - rewards boom potential that a
+    median-week lineup_uplift alone doesn't capture."""
+    undrafted = pool.loc[~pool['drafted']]
+    return (undrafted['p90_weekly'] - undrafted['p50_weekly']).clip(lower=0.0)
+
+
+def compute_draft_priority(pool: pd.DataFrame, lineup_vorp: pd.Series,
+                           scarcity: pd.Series, upside_bonus: pd.Series) -> pd.Series:
+    undrafted = pool.loc[~pool['drafted']]
+    scarcity_bonus = undrafted['position'].map(scarcity).fillna(0.0)
+    return (lineup_vorp.reindex(undrafted.index) +
+            SCARCITY_WEIGHT * scarcity_bonus +
+            UPSIDE_WEIGHT * upside_bonus.reindex(undrafted.index).fillna(0.0))
 
 
 def _on_clock_slot(draft: dict, pick_no: int) -> int:
@@ -881,13 +919,13 @@ def render_my_roster(my_roster: pd.DataFrame):
 def render_recommendations(pool: pd.DataFrame):
     st.subheader("Top 5 Recommendations")
     top5 = pool[~pool['drafted']].sort_values(
-        ['lineup_vorp', 'p90_weekly'], ascending=False).head(5).copy()
+        ['draft_priority', 'p90_weekly'], ascending=False).head(5).copy()
     top5['name'] = top5['first_name'] + ' ' + top5['last_name']
     display = top5[['name', 'position', 'team', 'p50_weekly', 'p90_weekly',
-                    'lineup_uplift', 'lineup_vorp']]
+                    'lineup_vorp', 'scarcity_bonus', 'upside_bonus', 'draft_priority']]
     styled = display.style.format({
-        'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}',
-        'lineup_uplift': '{:.1f}', 'lineup_vorp': '{:.1f}',
+        'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}', 'lineup_vorp': '{:.1f}',
+        'scarcity_bonus': '{:.1f}', 'upside_bonus': '{:.1f}', 'draft_priority': '{:.1f}',
     })
     st.dataframe(styled, hide_index=True)
 
@@ -910,14 +948,23 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     lineup_uplift = compute_lineup_uplift(
         pool, weekly_points, my_roster, settings, playoff_week_start)
     lineup_vorp = compute_lineup_vorp(pool, lineup_uplift, next_pick_number)
+    scarcity = compute_position_scarcity(
+        pool, lineup_uplift, next_pick_number, settings.teams)
+    upside_bonus = compute_upside_bonus(pool)
+    draft_priority = compute_draft_priority(pool, lineup_vorp, scarcity, upside_bonus)
+    undrafted_positions = pool.loc[~pool['drafted'], 'position']
     pool = pool.assign(
         lineup_uplift=lineup_uplift.reindex(pool.index).fillna(0.0),
-        lineup_vorp=lineup_vorp.reindex(pool.index))
+        lineup_vorp=lineup_vorp.reindex(pool.index),
+        scarcity_bonus=undrafted_positions.map(scarcity).reindex(pool.index).fillna(0.0),
+        upside_bonus=upside_bonus.reindex(pool.index).fillna(0.0),
+        draft_priority=draft_priority.reindex(pool.index))
 
     st.caption(f"Pick {len(data.picks) + 1} on the clock · refreshes every {DRAFT_TTL}s")
     st.caption(
-        f"VORP compares each player's lineup uplift with the first same-position "
-        f"ADP after your next pick (Pick {next_pick_number}).")
+        f"Priority = lineup VORP (vs. first same-position ADP after your next "
+        f"pick, Pick {next_pick_number}) + scarcity (value lost waiting one more "
+        f"round) + upside (P90 ceiling above a typical week).")
     if users_turn:
         st.success("It's your turn!")
     else:

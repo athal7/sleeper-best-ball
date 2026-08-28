@@ -3,6 +3,9 @@ import pytest
 from streamlit_app import (
     compute_lineup_uplift,
     compute_lineup_vorp,
+    compute_position_scarcity,
+    compute_upside_bonus,
+    compute_draft_priority,
     is_users_turn,
     next_user_pick_number,
     DraftData,
@@ -58,6 +61,71 @@ def test_compute_lineup_vorp_uses_replacement_uplift_after_next_pick():
     assert vorp['qb_now'] == pytest.approx(7.0)
     assert vorp['rb_now'] == pytest.approx(3.0)
 
+
+
+def test_compute_position_scarcity_flags_fast_eroding_replacement():
+    # QB replacement barely drops a round later (deep position); RB replacement
+    # collapses (thin position) - RB should show up as scarce, QB should not.
+    pool = build_pool({
+        'qb_now': {'position': 'QB', 'adp': 1, 'drafted': False},
+        'qb_rep_soon': {'position': 'QB', 'adp': 4, 'drafted': False},
+        'qb_rep_later': {'position': 'QB', 'adp': 14, 'drafted': False},
+        'rb_now': {'position': 'RB', 'adp': 2, 'drafted': False},
+        'rb_rep_soon': {'position': 'RB', 'adp': 5, 'drafted': False},
+        'rb_rep_later': {'position': 'RB', 'adp': 15, 'drafted': False},
+    })
+    uplift = pd.Series({
+        'qb_now': 10.0, 'qb_rep_soon': 9.0, 'qb_rep_later': 8.5,
+        'rb_now': 10.0, 'rb_rep_soon': 6.0, 'rb_rep_later': 1.0,
+    })
+
+    scarcity = compute_position_scarcity(
+        pool, uplift, next_pick_number=3, teams=10)
+
+    assert scarcity['RB'] == pytest.approx(5.0)
+    assert scarcity['QB'] == pytest.approx(0.5)
+
+
+def test_compute_position_scarcity_never_negative():
+    # Replacement level can rise a round later (e.g. a sleeper's ADP profile) -
+    # that's not "scarcity", so it should clip to zero rather than go negative.
+    pool = build_pool({
+        'wr_rep_soon': {'position': 'WR', 'adp': 4, 'drafted': False},
+        'wr_rep_later': {'position': 'WR', 'adp': 14, 'drafted': False},
+    })
+    uplift = pd.Series({'wr_rep_soon': 2.0, 'wr_rep_later': 6.0})
+
+    scarcity = compute_position_scarcity(pool, uplift, next_pick_number=3, teams=10)
+
+    assert scarcity['WR'] == pytest.approx(0.0)
+
+
+def test_compute_upside_bonus_rewards_ceiling_over_median():
+    pool = build_pool({
+        'boom_bust': {'position': 'WR', 'drafted': False, 'p50_weekly': 5.0, 'p90_weekly': 20.0},
+        'steady': {'position': 'WR', 'drafted': False, 'p50_weekly': 12.0, 'p90_weekly': 14.0},
+        'drafted_player': {'position': 'WR', 'drafted': True, 'p50_weekly': 5.0, 'p90_weekly': 25.0},
+    })
+
+    bonus = compute_upside_bonus(pool)
+
+    assert bonus['boom_bust'] == pytest.approx(15.0)
+    assert bonus['steady'] == pytest.approx(2.0)
+    assert 'drafted_player' not in bonus.index
+
+
+def test_compute_draft_priority_combines_vorp_scarcity_and_upside():
+    pool = build_pool({
+        'candidate': {'position': 'RB', 'drafted': False},
+    })
+    lineup_vorp = pd.Series({'candidate': 2.0})
+    scarcity = pd.Series({'RB': 4.0})
+    upside_bonus = pd.Series({'candidate': 10.0})
+
+    priority = compute_draft_priority(pool, lineup_vorp, scarcity, upside_bonus)
+
+    # 2.0 vorp + 1.0 * 4.0 scarcity + 0.15 * 10.0 upside
+    assert priority['candidate'] == pytest.approx(7.5)
 
 def test_compute_lineup_uplift_uses_each_weekly_prediction():
     settings = DraftSettings(teams=1, slots={'RB': 1, 'FLEX': 1})
