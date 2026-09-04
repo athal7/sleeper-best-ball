@@ -254,6 +254,32 @@ class DraftSettings:
                   if settings.get(key, 0) > 0}
         return cls(teams=settings['teams'], slots=slots)
 
+    @classmethod
+    def from_rosters(cls, rosters: pd.DataFrame) -> 'DraftSettings':
+        """Infer starting slots from the most common roster composition across the league."""
+        from collections import Counter
+        pos_counts = Counter()
+        for _, roster in rosters.iterrows():
+            for pos in roster.get('players', []):
+                player = Data.get_players().loc[pos, 'position']
+                pos_counts[player] += 1
+        # Normalize: divide by number of teams to get per-roster counts
+        teams = len(rosters)
+        slots = {pos: max(1, round(count / teams)) for pos, count in pos_counts.items()}
+        return cls(teams=teams, slots=slots)
+
+    @classmethod
+    def from_actual_roster(cls, rosters: pd.DataFrame, roster_id: str) -> 'DraftSettings':
+        """Infer starting slots from the user's own roster composition."""
+        roster = rosters.loc[roster_id]
+        players = roster.get('players', [])
+        pos_counts = {}
+        for pid in players:
+            pos = Data.get_players().loc[pid, 'position']
+            pos_counts[pos] = pos_counts.get(pos, 0) + 1
+        teams = len(rosters)
+        return cls(teams=teams, slots=pos_counts)
+
     @property
     def relevant_positions(self) -> set[str]:
         return {p for slot in self.slots for p in SLOT_ELIGIBILITY[slot]}
@@ -699,8 +725,10 @@ def build_my_roster(picks: list[dict], user_id: str, bye_weeks: dict[str, int]) 
 def _best_lineup_score(positions: pd.Series, scores: pd.Series,
                        slots: list[str]) -> float:
     states = {0: 0.0}
+    # Align scores to positions index so positional order matches score values
+    aligned_scores = scores.reindex(positions.index).fillna(0.0)
     position_values = positions.to_numpy()
-    score_values = scores.fillna(0.0).to_numpy()
+    score_values = aligned_scores.to_numpy()
     for slot in slots:
         next_states = {}
         for mask, total in states.items():
@@ -1009,20 +1037,236 @@ def render_draft_assistant(username: str):
 
     _draft_assistant_fragment(draft_id, user_id)
 
+@dataclass
+class WaiverData:
+    league_id: InitVar[int]
+    week: InitVar[int]
+    rosters: pd.DataFrame = None
+    users: pd.DataFrame = None
+    transactions: pd.DataFrame = None
+    _league: sleeper.League = field(default=None, init=False, repr=False)
+
+    def __post_init__(self, league_id: int, week: int):
+        self._league = Data.get_league(league_id)
+        if self.rosters is None:
+            self.rosters = pd.json_normalize(self._league.get_rosters()).set_index('roster_id')
+        if self.users is None:
+            self.users = pd.json_normalize(self._league.get_users())
+            if 'user_id' in self.users.columns:
+                self.users.set_index('user_id', inplace=True)
+        if self.transactions is None:
+            self.transactions = pd.DataFrame(self._league.get_transactions(week))
+
+    @property
+    def waiver_priority(self) -> list[str]:
+        """Return roster_ids ordered by current waiver priority (1 = first to spend)."""
+        return list(self.rosters.index)
+
+    @property
+    def waiver_settings(self) -> dict:
+        return self._league.get_league().get('settings', {})
+
+    def get_free_agent_player_ids(self, all_player_ids: set) -> set:
+        """Players not on any roster in the league."""
+        owned = set()
+        for _, roster in self.rosters.iterrows():
+            owned.update(roster.get('players', []))
+        return all_player_ids - owned
+
+    def get_user_roster_id(self, user_id: str) -> Optional[str]:
+        for rid, row in self.rosters.iterrows():
+            if row.get('owner_id') == user_id:
+                return rid
+        return None
+    def get_user_waiver_rank(self, user_id: str) -> int:
+        for rank, rid in enumerate(self.waiver_priority, 1):
+            if self.rosters.loc[rid, 'owner_id'] == user_id:
+                return rank
+        return len(self.waiver_priority)
+
+
+def build_waiver_pool(projections: pd.DataFrame, settings: DraftSettings,
+                      free_agent_ids: set, bye_weeks: dict[str, int]) -> pd.DataFrame:
+    """Build a pool of free agents with projection and metadata."""
+    players = Data.get_players()[['position', 'first_name', 'last_name', 'team']]
+    pool = projections.join(players, how='inner')
+    pool = pool[pool['position'].isin(settings.relevant_positions)]
+    pool = pool.reindex(list(free_agent_ids)).dropna()
+    return pool.assign(
+        bye_week=pool['team'].map(bye_weeks),
+        drafted=False,
+    )
+
+
+def compute_waiver_value(pool: pd.DataFrame, lineup_uplift: pd.Series,
+                         my_roster: pd.DataFrame, settings: DraftSettings,
+                         waiver_rank: int, teams: int,
+                         playoff_week_start: int | None = None) -> pd.DataFrame:
+    """Compute waiver recommendation scores for free agents.
+
+    Waiver value = lineup uplift (how much better this player makes your
+    best-week lineup) + upside bonus (P90 ceiling for boom weeks).
+    """
+
+    # Use pre-computed lineup_uplift; skip internal week recomputation.
+    uplift = lineup_uplift.reindex(pool.index).fillna(0.0)
+
+    my_roster_ids = my_roster.index.tolist()
+    if not my_roster_ids:
+        pool = pool.assign(drafted=False)
+        upside_bonus = compute_upside_bonus(pool)
+        waiver_priority = uplift + UPSIDE_WEIGHT * upside_bonus.reindex(pool.index).fillna(0.0)
+        return pool.assign(
+            lineup_uplift=pd.Series(0.0, index=pool.index),
+            waiver_vorp=pd.Series(0.0, index=pool.index),
+            waiver_scarcity=pd.Series(0.0, index=pool.index),
+            upside_bonus=upside_bonus.reindex(pool.index).fillna(0.0),
+            waiver_priority=waiver_priority,
+        )
+
+    pool = pool.assign(drafted=False)
+    upside_bonus = compute_upside_bonus(pool)
+
+    waiver_vorp = uplift
+    waiver_priority = uplift + UPSIDE_WEIGHT * upside_bonus.reindex(pool.index).fillna(0.0)
+
+    return pool.assign(
+        lineup_uplift=uplift,
+        waiver_vorp=waiver_vorp,
+        waiver_scarcity=pd.Series(0.0, index=pool.index),
+        upside_bonus=upside_bonus.reindex(pool.index).fillna(0.0),
+        waiver_priority=waiver_priority,
+    )
+
+
+def render_waiver_pool(pool: pd.DataFrame):
+    """Render waiver recommendations as a sortable dataframe."""
+    st.subheader("Top Waiver Adds")
+    top = pool.sort_values('waiver_priority', ascending=False).head(20).copy()
+    top['name'] = top['first_name'] + ' ' + top['last_name']
+    display = top[['name', 'position', 'team', 'bye_week', 'p50_weekly', 'p90_weekly',
+                   'lineup_uplift', 'waiver_vorp', 'waiver_scarcity', 'upside_bonus', 'waiver_priority']]
+    styled = display.style.format({
+        'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}', 'lineup_uplift': '{:.1f}',
+        'waiver_vorp': '{:.1f}', 'waiver_scarcity': '{:.1f}',
+        'upside_bonus': '{:.1f}', 'waiver_priority': '{:.1f}',
+    })
+    st.dataframe(styled, hide_index=True, height=600)
+
+
+def render_waiver_guide(username: str, week: int):
+    st.title("Waiver Guide \U0001f4dd")
+    if not username:
+        st.info("Enter your Sleeper username in the sidebar to find your leagues.")
+        return
+
+    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    user = sleeper.User(username)
+    try:
+        user_id = user.get_user_id()
+    except Exception as exc:  # noqa: BLE001
+        st.error(
+            f"Could not find Sleeper user '{username}'. "
+            f"Check the username, or retry if Sleeper is unavailable. ({exc})")
+        return
+
+    all_leagues = user.get_all_leagues('nfl', season)
+    active_leagues = [l for l in all_leagues if l.get('status') == 'in_season']
+    if not active_leagues:
+        st.info("No active leagues found for this user this season.")
+        return
+
+    if len(active_leagues) == 1:
+        league_id = active_leagues[0]['league_id']
+        st.query_params.update({'league_id': league_id})
+    else:
+        labels = {l['league_id']: l.get('name', l['league_id'])
+                  for l in active_leagues}
+        league_ids = list(labels)
+        remembered = st.query_params.get('league_id')
+        default_index = league_ids.index(remembered) if remembered in league_ids else 0
+        league_id = st.sidebar.selectbox(
+            "League", options=league_ids, index=default_index, format_func=lambda k: labels[k],
+            key="league_id_select",
+            on_change=lambda: st.query_params.update({'league_id': st.session_state.league_id_select}))
+
+    try:
+        waiver_data = WaiverData(league_id=int(league_id), week=week)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not load league data: {exc}")
+        return
+
+    roster_id = waiver_data.get_user_roster_id(user_id)
+    if roster_id is None:
+        st.warning("You do not have a roster in this league.")
+        return
+
+    user_roster = waiver_data.rosters.loc[[roster_id]]
+    user_players = user_roster['players'].iloc[0]
+    league = sleeper.League(int(league_id))
+    try:
+        settings = DraftSettings.from_draft(league.get_league())
+    except (KeyError, AttributeError):
+        settings = DraftSettings.from_actual_roster(waiver_data.rosters, roster_id)
+    scoring = fetch_draft_scoring(str(league_id))
+    bye_weeks = Data.get_bye_weeks(season)
+
+    projections = build_season_projections(season, scoring)
+    all_player_ids = set(Data.get_players().index)
+    free_agent_ids = waiver_data.get_free_agent_player_ids(all_player_ids)
+
+    if not free_agent_ids:
+        st.info("No free agents available — all players are on rosters.")
+        return
+
+    waiver_pool = build_waiver_pool(projections, settings, free_agent_ids, bye_weeks)
+    if waiver_pool.empty:
+        st.info("No free agents available at your league's starting positions.")
+        return
+
+    my_roster = build_my_roster([], user_id, bye_weeks)
+    if user_players:
+        my_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].loc[user_players]
+        my_roster['bye_week'] = my_roster['team'].map(bye_weeks)
+
+    waiver_rank = waiver_data.get_user_waiver_rank(user_id)
+    playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
+
+    weekly_points, _ = build_projection_inputs(season, scoring)
+    lineup_uplift = compute_lineup_uplift(
+        waiver_pool, weekly_points, my_roster, settings, playoff_week_start)
+
+    result = compute_waiver_value(
+        waiver_pool, lineup_uplift, my_roster, settings,
+        waiver_rank, settings.teams, playoff_week_start)
+
+    st.caption(
+        f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams} "
+        f"· refreshes every {DRAFT_TTL}s")
+    st.caption(
+        f"Priority = lineup uplift (best lineup improvement) + scarcity "
+        f"(thin positions with many competing teams) + upside (P90 ceiling).")
+    render_my_roster(my_roster)
+    render_waiver_pool(result)
+
 
 def main():
     username = st.sidebar.text_input(
         "Sleeper username", key='username_input',
         on_change=lambda: st.query_params.update({'username': st.session_state.username_input}),
         value=st.query_params.get('username'))
-    mode_options = ["Live Scores", "Draft Assistant"]
+    mode_options = ["Live Scores", "Draft Assistant", "Waiver Guide"]
     remembered_mode = st.query_params.get('mode', mode_options[0])
     mode_index = mode_options.index(remembered_mode) if remembered_mode in mode_options else 0
     mode = st.sidebar.radio(
         "View", mode_options, index=mode_index, key="app_mode",
         on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode}))
+    week_val = st.session_state.get('week', 1)
     if mode == "Draft Assistant":
         render_draft_assistant(username)
+        return
+    if mode == "Waiver Guide":
+        render_waiver_guide(username, int(week_val))
         return
 
     context = Context()
@@ -1041,16 +1285,14 @@ def main():
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
 
-    if context.leagues:
-        st.number_input("Week", min_value=1, max_value=18,
-                        key='week', value=context.week)
+    st.number_input("Week", min_value=1, max_value=18,
+                    key='week', value=context.week)
 
     for league in context.leagues:
         st.markdown(f"## {league.name}")
         for matchup in league.matchups(context):
             matchup.render()
         st.markdown(f"(League ID: {league.id})")
-
 
 if __name__ == "__main__":
     main()
