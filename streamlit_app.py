@@ -686,6 +686,12 @@ def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
     })
 
 
+
+@st.cache_data(ttl=METADATA_TTL)
+def get_user_leagues(username: str, season: int) -> tuple[str, list]:
+    """Returns (user_id, leagues) for the given Sleeper username and season."""
+    user = sleeper.User(username)
+    return user.get_user_id(), user.get_all_leagues('nfl', season)
 @st.cache_data(ttl=DRAFT_TTL)
 def get_user_drafts(username: str, season: int) -> tuple[str, list]:
     """Returns (user_id, drafts) for the given Sleeper username and season."""
@@ -896,6 +902,7 @@ class Context:
     username: Optional[str]
     leagues: List[League]
 
+
     @staticmethod
     @st.cache_data(ttl=METADATA_TTL)
     def _leagues(season: int, params: dict):
@@ -906,9 +913,9 @@ class Context:
         if locked_league_id:
             leagues = [locked_league_id]
         elif username:
-            user = sleeper.User(username)
+            _, all_leagues = get_user_leagues(username, season)
             leagues = [l['league_id']
-                       for l in user.get_all_leagues('nfl', season)]
+                       for l in all_leagues]
             if not leagues:
                 st.warning("No leagues found for this user.")
         return leagues
@@ -1004,7 +1011,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
 def render_draft_assistant(username: str):
     st.title("Draft Recommendation Engine \U0001f3af")
     if not username:
-        st.info("Enter your Sleeper username in the sidebar to find your active drafts.")
+        st.info("Enter your Sleeper username in the sidebar to find your drafts.")
         return
 
     season = int(sleeper.get_sport_state('nfl')['league_season'])
@@ -1016,22 +1023,21 @@ def render_draft_assistant(username: str):
             f"Check the username, or retry if Sleeper is unavailable. ({exc})")
         return
 
-    active_drafts = [d for d in drafts if d.get('status') in ('drafting', 'pre_draft')]
-    if not active_drafts:
-        st.info("No active drafts found for this user this season.")
+    if not drafts:
+        st.info("No drafts found for this user this season.")
         return
 
-    if len(active_drafts) == 1:
-        draft_id = active_drafts[0]['draft_id']
+    if len(drafts) == 1:
+        draft_id = drafts[0]['draft_id']
         st.query_params['draft_id'] = draft_id
     else:
         labels = {d['draft_id']: d.get('metadata', {}).get('name') or d['draft_id']
-                  for d in active_drafts}
+                  for d in drafts}
         draft_ids = list(labels)
         remembered = st.query_params.get('draft_id')
         default_index = draft_ids.index(remembered) if remembered in draft_ids else 0
         draft_id = st.sidebar.selectbox(
-            "Active draft", options=draft_ids, index=default_index, format_func=lambda k: labels[k],
+            "Draft", options=draft_ids, index=default_index, format_func=lambda k: labels[k],
             key="draft_id_select",
             on_change=lambda: st.query_params.update({'draft_id': st.session_state.draft_id_select}))
 
@@ -1161,27 +1167,24 @@ def render_waiver_guide(username: str, week: int):
         return
 
     season = int(sleeper.get_sport_state('nfl')['league_season'])
-    user = sleeper.User(username)
     try:
-        user_id = user.get_user_id()
+        user_id, all_leagues = get_user_leagues(username, season)
     except Exception as exc:  # noqa: BLE001
         st.error(
             f"Could not find Sleeper user '{username}'. "
             f"Check the username, or retry if Sleeper is unavailable. ({exc})")
         return
 
-    all_leagues = user.get_all_leagues('nfl', season)
-    active_leagues = [l for l in all_leagues if l.get('status') == 'in_season']
-    if not active_leagues:
-        st.info("No active leagues found for this user this season.")
+    if not all_leagues:
+        st.info("No leagues found for this user this season.")
         return
 
-    if len(active_leagues) == 1:
-        league_id = active_leagues[0]['league_id']
+    if len(all_leagues) == 1:
+        league_id = all_leagues[0]['league_id']
         st.query_params.update({'league_id': league_id})
     else:
         labels = {l['league_id']: l.get('name', l['league_id'])
-                  for l in active_leagues}
+                  for l in all_leagues}
         league_ids = list(labels)
         remembered = st.query_params.get('league_id')
         default_index = league_ids.index(remembered) if remembered in league_ids else 0
