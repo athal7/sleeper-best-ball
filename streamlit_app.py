@@ -314,9 +314,9 @@ class Player:
 
     def get_status(self) -> str:
         vs = "vs" if self.home else "@"
-        if self.bye:
+        if (pd.notna(self.bye) and bool(self.bye)) or pd.isna(self.game_status):
             return "Bye"
-        elif self.pct_played == 0 and self.game_time:
+        elif self.pct_played == 0 and pd.notna(self.game_time) and self.game_time:
             game_time = pd.to_datetime(self.game_time).tz_convert(
                 st.context.timezone).strftime('%a %-I:%M %p')
             return f"{game_time} {vs} {self.opponent}"
@@ -582,11 +582,11 @@ class League:
         )[['team', 'first_name', 'last_name', 'position', 'injury_status']]
         df = df[df['team'].notna()]
         df = df.join(self.data.game_statuses, on='team', how='left')
-        df['pct_played'] = (df['quarter'] * 15 - df['clock'] / 60) / 60
+        df['bye'] = df['game_status'].isna()
+        quarter = df['quarter'].fillna(0)
+        clock = df['clock'].fillna(0)
+        df['pct_played'] = (quarter * 15 - clock / 60) / 60
         df['pct_played'] = df['pct_played'].clip(0, 1)
-        df['bye'] = False
-        df.loc[df['pct_played'].isna(), 'bye'] = True
-        df.loc[df['pct_played'].isna(), 'pct_played'] = 0
         df['points'] = df.apply(
             self._calc_points_from_stats(self.data.stats, self.data.scoring), axis=1)
         df['projection'] = df.apply(

@@ -58,3 +58,26 @@ def test_points_calculations():
     assert p5['points'] == 0
     assert p5['projection'] == 0
     assert p5['optimistic'] == 0
+
+
+def test_bye_week_player():
+    data = tests.mock.data()
+    data.players = pd.DataFrame.from_dict({
+        1: tests.mock.player(team='BYE_TEAM', position='QB'),
+        2: tests.mock.player(team='A', position='WR'),
+    }, orient='index')
+    # BYE_TEAM is not in game_statuses
+    data.game_statuses = pd.DataFrame.from_dict({
+        'A': tests.mock.game_status(quarter=1, clock=15*60),
+    }, orient='index')
+    data.projections = pd.DataFrame()
+    data.stats = pd.DataFrame()
+    data.league.get_league.return_value = {
+        'scoring_settings': {},
+        'roster_positions': ['QB', 'WR']
+    }
+    league = League(data=data)
+    df = league.players()
+    bye_player = df[df['team'] == 'BYE_TEAM'].iloc[0]
+    assert bye_player['bye'] is True or bye_player['bye'] == True
+    assert bye_player['pct_played'] == 0.0

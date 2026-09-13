@@ -37,6 +37,8 @@ def test_name():
     (player(), f"Sun 1:00 PM @ NYG"),
     (player(home=True), f"Sun 1:00 PM vs NYG"),
     (player(bye=True), "Bye"),
+    (player(bye=True, game_status=None), "Bye"),
+    (player(bye=False, game_status=None), "Bye"),
     (player(game_status='5:00 4th Q', pct_played=50,
      score=14, opponent_score=7), f"5:00 4th Q 14-7 @ NYG"),
     (player(game_status='Final', pct_played=100,
