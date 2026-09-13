@@ -353,7 +353,11 @@ class Player:
     @property
     def player_info(self) -> str:
         info = f"{self.position} - {self.team}"
-        if self.injury_status:
+        if (
+            self.injury_status
+            and pd.notna(self.injury_status)
+            and str(self.injury_status).strip().lower() not in ('nan', 'none', '')
+        ):
             info += f" ({self.INJURY_STATUS_MAP.get(self.injury_status, self.injury_status)})"
         return info
 
