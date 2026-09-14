@@ -82,6 +82,11 @@ def test_get_projection(player, expected):
     (player(), "RB - DAL"),
     (player(injury_status='IR'), "RB - DAL (IR)"),
     (player(injury_status='Questionable'), "RB - DAL (Q)"),
+    (player(injury_status=float('nan')), "RB - DAL"),
+    (player(injury_status='nan'), "RB - DAL"),
+    (player(injury_status='NaN'), "RB - DAL"),
+    (player(injury_status=None), "RB - DAL"),
+    (player(injury_status=''), "RB - DAL"),
 ])
 def test_player_info(player, expected):
     assert player.player_info == expected
