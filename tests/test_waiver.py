@@ -4,6 +4,7 @@ import pytest
 from streamlit_app import (
     build_waiver_pool,
     compute_waiver_value,
+    compute_waiver_add_drop_recommendations,
     DraftSettings,
     compute_upside_bonus,
     UPSIDE_WEIGHT,
@@ -239,6 +240,66 @@ def test_compute_waiver_value_includes_all_output_columns():
     expected_cols = {'lineup_uplift', 'waiver_vorp', 'waiver_scarcity',
                      'upside_bonus', 'waiver_priority'}
     assert expected_cols.issubset(set(result.columns))
+
+
+# --- compute_waiver_add_drop_recommendations ---
+
+def test_compute_waiver_add_drop_recommendations_improves_team():
+    """Should recommend adding a higher-scoring player and dropping the weakest roster player if net uplift > 0."""
+    settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1})
+    waiver_pool = build_pool({
+        'fa1': {'position': 'RB', 'first_name': 'Free', 'last_name': 'Agent', 'team': 'FA', 'p50_weekly': 15.0, 'p90_weekly': 20.0},
+    })
+    my_roster = pd.DataFrame({
+        'position': ['QB', 'RB'],
+        'first_name': ['Quarter', 'Bench'],
+        'last_name': ['Back', 'RB'],
+        'team': ['QB', 'RB'],
+        'p50_weekly': [20.0, 5.0],
+        'p90_weekly': [25.0, 8.0],
+    }, index=['qb1', 'rb_weak'])
+
+    weekly_points = pd.DataFrame({
+        1: {'fa1': 15.0, 'qb1': 20.0, 'rb_weak': 5.0},
+    })
+
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings)
+
+    assert not recs.empty
+    assert len(recs) == 1
+    assert recs.iloc[0]['add_player_id'] == 'fa1'
+    assert recs.iloc[0]['drop_player_id'] == 'rb_weak'
+    assert recs.iloc[0]['uplift'] == pytest.approx(10.0)
+    assert recs.iloc[0]['add_p50'] == 15.0
+    assert recs.iloc[0]['add_p90'] == 20.0
+    assert recs.iloc[0]['drop_p50'] == 5.0
+    assert recs.iloc[0]['drop_p90'] == 8.0
+
+
+def test_compute_waiver_add_drop_recommendations_filters_out_non_positive_uplift():
+    """Should return empty DataFrame when free agent does not improve team (net uplift <= 0)."""
+    settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1})
+    waiver_pool = build_pool({
+        'fa_weak': {'position': 'RB', 'first_name': 'Weak', 'last_name': 'FA', 'team': 'FA', 'p50_weekly': 2.0, 'p90_weekly': 4.0},
+    })
+    my_roster = pd.DataFrame({
+        'position': ['QB', 'RB'],
+        'first_name': ['Star', 'Star'],
+        'last_name': ['QB', 'RB'],
+        'team': ['QB', 'RB'],
+        'p50_weekly': [20.0, 15.0],
+        'p90_weekly': [25.0, 20.0],
+    }, index=['qb1', 'rb1'])
+
+    weekly_points = pd.DataFrame({
+        1: {'fa_weak': 2.0, 'qb1': 20.0, 'rb1': 15.0},
+    })
+
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings)
+
+    assert recs.empty
 
 
 def test_compute_waiver_value_empty_roster_has_all_columns():
