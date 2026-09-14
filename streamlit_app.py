@@ -1031,21 +1031,12 @@ def render_draft_assistant(username: str):
         st.info("No drafts found for this user this season.")
         return
 
-    if len(drafts) == 1:
-        draft_id = drafts[0]['draft_id']
-        st.query_params['draft_id'] = draft_id
-    else:
-        labels = {d['draft_id']: d.get('metadata', {}).get('name') or d['draft_id']
-                  for d in drafts}
-        draft_ids = list(labels)
-        remembered = st.query_params.get('draft_id')
-        default_index = draft_ids.index(remembered) if remembered in draft_ids else 0
-        draft_id = st.sidebar.selectbox(
-            "Draft", options=draft_ids, index=default_index, format_func=lambda k: labels[k],
-            key="draft_id_select",
-            on_change=lambda: st.query_params.update({'draft_id': st.session_state.draft_id_select}))
-
-    _draft_assistant_fragment(draft_id, user_id)
+    for draft in drafts:
+        draft_id = draft['draft_id']
+        name = draft.get('metadata', {}).get('name') or draft_id
+        st.markdown(f"## {name}")
+        _draft_assistant_fragment(draft_id, user_id)
+        st.markdown(f"(Draft ID: {draft_id})")
 
 @dataclass
 class WaiverData:
@@ -1330,39 +1321,7 @@ def render_waiver_pool(recommendations: pd.DataFrame):
     st.dataframe(styled, hide_index=True, height=600)
 
 
-def render_waiver_guide(username: str, week: int):
-    st.title("Waiver Guide \U0001f4dd")
-    if not username:
-        st.info("Enter your Sleeper username in the sidebar to find your leagues.")
-        return
-
-    season = int(sleeper.get_sport_state('nfl')['league_season'])
-    try:
-        user_id, all_leagues = get_user_leagues(username, season)
-    except Exception as exc:  # noqa: BLE001
-        st.error(
-            f"Could not find Sleeper user '{username}'. "
-            f"Check the username, or retry if Sleeper is unavailable. ({exc})")
-        return
-
-    if not all_leagues:
-        st.info("No leagues found for this user this season.")
-        return
-
-    if len(all_leagues) == 1:
-        league_id = all_leagues[0]['league_id']
-        st.query_params.update({'league_id': league_id})
-    else:
-        labels = {l['league_id']: l.get('name', l['league_id'])
-                  for l in all_leagues}
-        league_ids = list(labels)
-        remembered = st.query_params.get('league_id')
-        default_index = league_ids.index(remembered) if remembered in league_ids else 0
-        league_id = st.sidebar.selectbox(
-            "League", options=league_ids, index=default_index, format_func=lambda k: labels[k],
-            key="league_id_select",
-            on_change=lambda: st.query_params.update({'league_id': st.session_state.league_id_select}))
-
+def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, week: int):
     try:
         waiver_data = WaiverData(league_id=int(league_id), week=week)
     except Exception as exc:  # noqa: BLE001
@@ -1421,6 +1380,33 @@ def render_waiver_guide(username: str, week: int):
         f"Showing recommendations that improve your team's projected lineup score.")
     render_my_roster(my_roster)
     render_waiver_pool(recs)
+
+
+def render_waiver_guide(username: str, week: int):
+    st.title("Waiver Guide \U0001f4dd")
+    if not username:
+        st.info("Enter your Sleeper username in the sidebar to find your leagues.")
+        return
+
+    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    try:
+        user_id, all_leagues = get_user_leagues(username, season)
+    except Exception as exc:  # noqa: BLE001
+        st.error(
+            f"Could not find Sleeper user '{username}'. "
+            f"Check the username, or retry if Sleeper is unavailable. ({exc})")
+        return
+
+    if not all_leagues:
+        st.info("No leagues found for this user this season.")
+        return
+
+    for l in all_leagues:
+        league_id = l['league_id']
+        name = l.get('name') or league_id
+        st.markdown(f"## {name}")
+        _waiver_guide_league_fragment(league_id, user_id, season, week)
+        st.markdown(f"(League ID: {league_id})")
 
 
 def main():
