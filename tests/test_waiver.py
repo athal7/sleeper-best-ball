@@ -302,6 +302,36 @@ def test_compute_waiver_add_drop_recommendations_filters_out_non_positive_uplift
     assert recs.empty
 
 
+def test_compute_waiver_add_drop_recommendations_rest_of_season():
+    """Should only calculate uplift for current_week and subsequent weeks."""
+    settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1})
+    waiver_pool = build_pool({
+        'fa1': {'position': 'RB', 'first_name': 'Late', 'last_name': 'Bloomer', 'team': 'FA', 'p50_weekly': 15.0, 'p90_weekly': 20.0},
+    })
+    my_roster = pd.DataFrame({
+        'position': ['QB', 'RB'],
+        'first_name': ['Quarter', 'Bench'],
+        'last_name': ['Back', 'RB'],
+        'team': ['QB', 'RB'],
+        'p50_weekly': [20.0, 5.0],
+        'p90_weekly': [25.0, 8.0],
+    }, index=['qb1', 'rb_weak'])
+
+    # Week 1: fa1 scores 100 points (should be ignored when current_week=2)
+    # Week 2: fa1 scores 10 points vs rb_weak 5 points -> uplift = +5 points
+    weekly_points = pd.DataFrame({
+        1: {'fa1': 100.0, 'qb1': 20.0, 'rb_weak': 5.0},
+        2: {'fa1': 10.0, 'qb1': 20.0, 'rb_weak': 5.0},
+    })
+
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings, current_week=2)
+
+    assert not recs.empty
+    # Rest-of-season uplift starting at week 2 should equal week 2 uplift (5.0), not average of week 1 and 2 (52.5)
+    assert recs.iloc[0]['uplift'] == pytest.approx(5.0)
+
+
 def test_compute_waiver_value_empty_roster_has_all_columns():
     """Even with empty roster, result should have all columns."""
     settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 2, 'WR': 3, 'TE': 1, 'FLEX': 1})

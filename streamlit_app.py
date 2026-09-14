@@ -948,9 +948,11 @@ def render_my_roster(my_roster: pd.DataFrame):
     st.caption(f"Position counts: {positions}")
     display = my_roster.copy()
     display['name'] = display['first_name'] + ' ' + display['last_name']
+    cols = ['name', 'position', 'team', 'bye_week']
     st.dataframe(
-        display[['name', 'position', 'team', 'bye_week']].sort_values('position'),
+        display[cols].sort_values('position'),
         hide_index=True,
+        column_order=cols,
     )
 
 
@@ -966,7 +968,7 @@ def render_recommendations(pool: pd.DataFrame):
         'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}', 'lineup_vorp': '{:.1f}',
         'scarcity_bonus': '{:.1f}', 'upside_bonus': '{:.1f}', 'draft_priority': '{:.1f}',
     })
-    st.dataframe(styled, hide_index=True)
+    st.dataframe(styled, hide_index=True, column_order=display.columns.tolist())
 
 
 @st.fragment(run_every=DRAFT_TTL)
@@ -1156,13 +1158,14 @@ def compute_waiver_add_drop_recommendations(
     settings: DraftSettings,
     projections: pd.DataFrame = None,
     playoff_week_start: int | None = None,
+    current_week: int = 1,
 ) -> pd.DataFrame:
     """Compute add/drop recommendations that strictly improve the team (uplift > 0).
 
     For each free agent candidate A in waiver_pool and each roster player D in my_roster,
-    computes the net team lineup score uplift across all weeks when dropping D and adding A.
-    Identifies the drop player D that maximizes net uplift for candidate A, and filters out
-    any recommendations with net uplift <= 0.
+    computes the net team lineup score uplift across rest of season weeks (>= current_week)
+    when dropping D and adding A. Identifies the drop player D that maximizes net uplift
+    for candidate A, and filters out any recommendations with net uplift <= 0.
     """
     if waiver_pool.empty:
         return pd.DataFrame()
@@ -1173,7 +1176,7 @@ def compute_waiver_add_drop_recommendations(
         for _ in range(count)
     ]
 
-    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS]
+    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS and w >= current_week]
     if not weeks:
         return pd.DataFrame()
 
@@ -1327,7 +1330,7 @@ def render_waiver_pool(recommendations: pd.DataFrame):
         'Drop P50': '{:.1f}', 'Drop P90': '{:.1f}',
         'Uplift': '{:.1f}',
     })
-    st.dataframe(styled, hide_index=True, height=600)
+    st.dataframe(styled, hide_index=True, height=600, column_order=display.columns.tolist())
 
 
 def render_waiver_guide(username: str, week: int):
@@ -1412,14 +1415,14 @@ def render_waiver_guide(username: str, week: int):
     weekly_points, _ = build_projection_inputs(season, scoring)
     recs = compute_waiver_add_drop_recommendations(
         waiver_pool, weekly_points, my_roster, settings,
-        projections=projections, playoff_week_start=playoff_week_start)
+        projections=projections, playoff_week_start=playoff_week_start,
+        current_week=week)
 
     st.caption(
         f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams} "
         f"· refreshes every {DRAFT_TTL}s")
     st.caption(
         f"Showing recommendations that improve your team's projected lineup score.")
-    render_my_roster(my_roster)
     render_waiver_pool(recs)
 
 
