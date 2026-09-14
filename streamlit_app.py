@@ -1149,17 +1149,183 @@ def compute_waiver_value(pool: pd.DataFrame, lineup_uplift: pd.Series,
     )
 
 
-def render_waiver_pool(pool: pd.DataFrame):
+def compute_waiver_add_drop_recommendations(
+    waiver_pool: pd.DataFrame,
+    weekly_points: pd.DataFrame,
+    my_roster: pd.DataFrame,
+    settings: DraftSettings,
+    projections: pd.DataFrame = None,
+    playoff_week_start: int | None = None,
+) -> pd.DataFrame:
+    """Compute add/drop recommendations that strictly improve the team (uplift > 0).
+
+    For each free agent candidate A in waiver_pool and each roster player D in my_roster,
+    computes the net team lineup score uplift across all weeks when dropping D and adding A.
+    Identifies the drop player D that maximizes net uplift for candidate A, and filters out
+    any recommendations with net uplift <= 0.
+    """
+    if waiver_pool.empty:
+        return pd.DataFrame()
+
+    slots = [
+        slot
+        for slot, count in settings.slots.items()
+        for _ in range(count)
+    ]
+
+    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS]
+    if not weeks:
+        return pd.DataFrame()
+
+    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
+    weights = {
+        w: (playoff_weight if playoff_week_start is not None and w >= playoff_week_start else 1.0)
+        for w in weeks
+    }
+    total_weight = sum(weights.values())
+
+    roster_indices = my_roster.index.tolist() if not my_roster.empty else []
+
+    baseline_scores = {}
+    baseline_minus_D = {}
+    without_slot_minus_D = {}
+
+    for w in weeks:
+        w_scores = weekly_points[w]
+        if roster_indices:
+            r_positions = my_roster['position']
+            r_scores = w_scores.reindex(roster_indices).fillna(0.0)
+            baseline_scores[w] = _best_lineup_score(r_positions, r_scores, slots)
+
+            for d_id in roster_indices:
+                r_sub = my_roster.drop(index=d_id)
+                sub_positions = r_sub['position']
+                sub_scores = w_scores.reindex(r_sub.index).fillna(0.0)
+                baseline_minus_D[(w, d_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
+                without_slot_minus_D[(w, d_id)] = [
+                    _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
+                    for i in range(len(slots))
+                ]
+        else:
+            baseline_scores[w] = 0.0
+
+    if projections is None:
+        projections = pd.DataFrame()
+
+    recs = []
+
+    for a_id, a_row in waiver_pool.iterrows():
+        pos_A = a_row['position']
+        eligible_indices = [i for i, s in enumerate(slots) if pos_A in SLOT_ELIGIBILITY[s]]
+
+        a_first = a_row.get('first_name', '')
+        a_last = a_row.get('last_name', '')
+        a_name = f"{a_first} {a_last}".strip() if (a_first or a_last) else str(a_id)
+        a_team = a_row.get('team', '')
+        a_p50 = float(a_row.get('p50_weekly', projections.loc[a_id, 'p50_weekly'] if a_id in projections.index else 0.0))
+        a_p90 = float(a_row.get('p90_weekly', projections.loc[a_id, 'p90_weekly'] if a_id in projections.index else 0.0))
+
+        if roster_indices:
+            best_d_id = None
+            best_uplift = -float('inf')
+
+            for d_id in roster_indices:
+                weighted_uplift_sum = 0.0
+                for w in weeks:
+                    score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
+                    base_sub = baseline_minus_D[(w, d_id)]
+                    if eligible_indices:
+                        w_slots = without_slot_minus_D[(w, d_id)]
+                        best_with_A = max(w_slots[i] + score_A for i in eligible_indices)
+                        new_score = max(base_sub, best_with_A)
+                    else:
+                        new_score = base_sub
+                    net_w = new_score - baseline_scores[w]
+                    weighted_uplift_sum += weights[w] * net_w
+
+                avg_uplift = weighted_uplift_sum / total_weight
+                if avg_uplift > best_uplift:
+                    best_uplift = avg_uplift
+                    best_d_id = d_id
+
+            if best_uplift > 0 and best_d_id is not None:
+                d_row = my_roster.loc[best_d_id]
+                d_first = d_row.get('first_name', '')
+                d_last = d_row.get('last_name', '')
+                d_name = f"{d_first} {d_last}".strip() if (d_first or d_last) else str(best_d_id)
+                d_pos = d_row.get('position', '')
+                d_team = d_row.get('team', '')
+                d_p50 = float(d_row.get('p50_weekly', projections.loc[best_d_id, 'p50_weekly'] if best_d_id in projections.index else 0.0))
+                d_p90 = float(d_row.get('p90_weekly', projections.loc[best_d_id, 'p90_weekly'] if best_d_id in projections.index else 0.0))
+
+                recs.append({
+                    'add_player_id': a_id,
+                    'add_name': a_name,
+                    'add_position': pos_A,
+                    'add_team': a_team,
+                    'add_p50': a_p50,
+                    'add_p90': a_p90,
+                    'drop_player_id': best_d_id,
+                    'drop_name': d_name,
+                    'drop_position': d_pos,
+                    'drop_team': d_team,
+                    'drop_p50': d_p50,
+                    'drop_p90': d_p90,
+                    'uplift': best_uplift,
+                })
+        else:
+            weighted_uplift_sum = 0.0
+            for w in weeks:
+                score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
+                new_score = score_A if eligible_indices else 0.0
+                weighted_uplift_sum += weights[w] * new_score
+
+            avg_uplift = weighted_uplift_sum / total_weight
+            if avg_uplift > 0:
+                recs.append({
+                    'add_player_id': a_id,
+                    'add_name': a_name,
+                    'add_position': pos_A,
+                    'add_team': a_team,
+                    'add_p50': a_p50,
+                    'add_p90': a_p90,
+                    'drop_player_id': None,
+                    'drop_name': 'None',
+                    'drop_position': '',
+                    'drop_team': '',
+                    'drop_p50': 0.0,
+                    'drop_p90': 0.0,
+                    'uplift': avg_uplift,
+                })
+
+    df = pd.DataFrame(recs)
+    if not df.empty:
+        df.sort_values(by='uplift', ascending=False, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+    return df
+
+
+def render_waiver_pool(recommendations: pd.DataFrame):
     """Render waiver recommendations as a sortable dataframe."""
-    st.subheader("Top Waiver Adds")
-    top = pool.sort_values('waiver_priority', ascending=False).head(20).copy()
-    top['name'] = top['first_name'] + ' ' + top['last_name']
-    display = top[['name', 'position', 'team', 'bye_week', 'p50_weekly', 'p90_weekly',
-                   'lineup_uplift', 'waiver_vorp', 'waiver_scarcity', 'upside_bonus', 'waiver_priority']]
+    st.subheader("Waiver Recommendations")
+    if recommendations.empty:
+        st.info("None")
+        return
+
+    display = recommendations[[
+        'add_name', 'add_position', 'add_team', 'add_p50', 'add_p90',
+        'drop_name', 'drop_position', 'drop_team', 'drop_p50', 'drop_p90',
+        'uplift'
+    ]].copy()
+    display.columns = [
+        'Add Player', 'Add Pos', 'Add Team', 'Add P50', 'Add P90',
+        'Drop Player', 'Drop Pos', 'Drop Team', 'Drop P50', 'Drop P90',
+        'Uplift'
+    ]
     styled = display.style.format({
-        'p50_weekly': '{:.1f}', 'p90_weekly': '{:.1f}', 'lineup_uplift': '{:.1f}',
-        'waiver_vorp': '{:.1f}', 'waiver_scarcity': '{:.1f}',
-        'upside_bonus': '{:.1f}', 'waiver_priority': '{:.1f}',
+        'Add P50': '{:.1f}', 'Add P90': '{:.1f}',
+        'Drop P50': '{:.1f}', 'Drop P90': '{:.1f}',
+        'Uplift': '{:.1f}',
     })
     st.dataframe(styled, hide_index=True, height=600)
 
@@ -1236,25 +1402,25 @@ def render_waiver_guide(username: str, week: int):
         my_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].loc[user_players]
         my_roster['bye_week'] = my_roster['team'].map(bye_weeks)
 
+    my_roster = my_roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
+    my_roster['p50_weekly'] = my_roster['p50_weekly'].fillna(0.0)
+    my_roster['p90_weekly'] = my_roster['p90_weekly'].fillna(0.0)
+
     waiver_rank = waiver_data.get_user_waiver_rank(user_id)
     playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
 
     weekly_points, _ = build_projection_inputs(season, scoring)
-    lineup_uplift = compute_lineup_uplift(
-        waiver_pool, weekly_points, my_roster, settings, playoff_week_start)
-
-    result = compute_waiver_value(
-        waiver_pool, lineup_uplift, my_roster, settings,
-        waiver_rank, settings.teams, playoff_week_start)
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings,
+        projections=projections, playoff_week_start=playoff_week_start)
 
     st.caption(
         f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams} "
         f"· refreshes every {DRAFT_TTL}s")
     st.caption(
-        f"Priority = lineup uplift (best lineup improvement) + scarcity "
-        f"(thin positions with many competing teams) + upside (P90 ceiling).")
+        f"Showing recommendations that improve your team's projected lineup score.")
     render_my_roster(my_roster)
-    render_waiver_pool(result)
+    render_waiver_pool(recs)
 
 
 def main():
