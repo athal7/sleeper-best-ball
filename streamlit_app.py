@@ -1419,10 +1419,12 @@ def main():
         value=st.query_params.get('username'))
     mode_options = ["Live Scores", "Draft Assistant", "Waiver Guide"]
     remembered_mode = st.query_params.get('mode', mode_options[0])
-    mode_index = mode_options.index(remembered_mode) if remembered_mode in mode_options else 0
-    mode = st.sidebar.radio(
-        "View", mode_options, index=mode_index, key="app_mode",
-        on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode}))
+    mode_default = remembered_mode if remembered_mode in mode_options else mode_options[0]
+    mode = st.sidebar.segmented_control(
+        "View", mode_options, default=mode_default, key="app_mode",
+        on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode or mode_options[0]}))
+    if not mode:
+        mode = mode_default
     week_val = st.session_state.get('week', 1)
     if mode == "Draft Assistant":
         render_draft_assistant(username)
