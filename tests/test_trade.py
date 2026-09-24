@@ -59,11 +59,12 @@ def test_compute_trade_recommendations_win_win_trade():
     row = match.iloc[0]
     assert row['my_uplift'] == pytest.approx(18.0)
     assert row['partner_uplift'] == pytest.approx(18.0)
-    assert bool(row['win_win']) is True
+    assert (recs['my_uplift'] > 0).all()
+    assert (recs['partner_uplift'] > 0).all()
 
 
-def test_compute_trade_recommendations_one_sided_trade():
-    """One-sided trade: My team gains points, but partner team loses points."""
+def test_compute_trade_recommendations_excludes_one_sided_trade():
+    """Exclude trades that help me but hurt the partner."""
     settings = DraftSettings(teams=12, slots={'RB': 1, 'WR': 1})
 
     # My Team: 1 WR (10.0), 0 RBs
@@ -101,13 +102,7 @@ def test_compute_trade_recommendations_one_sided_trade():
     recs = compute_trade_recommendations(
         my_roster, opponent_rosters, weekly_points, settings)
 
-    assert not recs.empty
-    match = recs[(recs['give_player_id'] == 'wr_weak_my') & (recs['receive_player_id'] == 'rb_star_opp')]
-    assert not match.empty
-    row = match.iloc[0]
-    assert row['my_uplift'] > 0  # My team gains an RB
-    assert row['partner_uplift'] < 0  # Partner team loses their star RB
-    assert bool(row['win_win']) is False
+    assert recs.empty
 
 
 def test_compute_trade_recommendations_filters_out_non_positive_my_uplift():
