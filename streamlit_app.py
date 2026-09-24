@@ -1017,7 +1017,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
 def render_draft_assistant(username: str):
     st.title("Draft Recommendation Engine \U0001f3af")
     if not username:
-        st.info("Enter your Sleeper username in the sidebar to find your drafts.")
+        st.info("Enter your Sleeper username above to find your drafts.")
         return
 
     season = int(sleeper.get_sport_state('nfl')['league_season'])
@@ -1388,7 +1388,7 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
 def render_waiver_guide(username: str, week: int):
     st.title("Waiver Guide \U0001f4dd")
     if not username:
-        st.info("Enter your Sleeper username in the sidebar to find your leagues.")
+        st.info("Enter your Sleeper username above to find your leagues.")
         return
 
     season = int(sleeper.get_sport_state('nfl')['league_season'])
@@ -1413,14 +1413,14 @@ def render_waiver_guide(username: str, week: int):
 
 
 def main():
-    username = st.sidebar.text_input(
+    username = st.text_input(
         "Sleeper username", key='username_input',
         on_change=lambda: st.query_params.update({'username': st.session_state.username_input}),
         value=st.query_params.get('username'))
     mode_options = ["Live Scores", "Draft Assistant", "Waiver Guide"]
     remembered_mode = st.query_params.get('mode', mode_options[0])
     mode_default = remembered_mode if remembered_mode in mode_options else mode_options[0]
-    mode = st.sidebar.segmented_control(
+    mode = st.segmented_control(
         "View", mode_options, default=mode_default, key="app_mode",
         on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode or mode_options[0]}))
     if not mode:
