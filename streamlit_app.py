@@ -232,7 +232,12 @@ class Positions(pd.DataFrame):
         super().__init__(df[['position', 'eligible']])
 
 
-SLOT_ELIGIBILITY = {slot: eligible for slot, _, eligible in Positions.MAPPINGS}
+SLOT_ELIGIBILITY = {slot: set(eligible) for slot, _, eligible in Positions.MAPPINGS}
+
+
+@st.cache_data(ttl=STATIC_TTL)
+def get_sport_state(sport: str = 'nfl') -> dict:
+    return sleeper.get_sport_state(sport)
 
 
 
@@ -259,10 +264,13 @@ class DraftSettings:
         """Infer starting slots from the most common roster composition across the league."""
         from collections import Counter
         pos_counts = Counter()
+        players_df = Data.get_players()
+        player_pos_map = players_df['position'].to_dict() if 'position' in players_df.columns else {}
         for _, roster in rosters.iterrows():
             for pos in roster.get('players', []):
-                player = Data.get_players().loc[pos, 'position']
-                pos_counts[player] += 1
+                player = player_pos_map.get(pos)
+                if player:
+                    pos_counts[player] += 1
         # Normalize: divide by number of teams to get per-roster counts
         teams = len(rosters)
         slots = {pos: max(1, round(count / teams)) for pos, count in pos_counts.items()}
@@ -273,10 +281,13 @@ class DraftSettings:
         """Infer starting slots from the user's own roster composition."""
         roster = rosters.loc[roster_id]
         players = roster.get('players', [])
+        players_df = Data.get_players()
+        player_pos_map = players_df['position'].to_dict() if 'position' in players_df.columns else {}
         pos_counts = {}
         for pid in players:
-            pos = Data.get_players().loc[pid, 'position']
-            pos_counts[pos] = pos_counts.get(pos, 0) + 1
+            pos = player_pos_map.get(pid)
+            if pos:
+                pos_counts[pos] = pos_counts.get(pos, 0) + 1
         teams = len(rosters)
         return cls(teams=teams, slots=pos_counts)
 
@@ -645,7 +656,7 @@ def fetch_draft_scoring(league_id: Optional[str]) -> dict:
     """Real league scoring (so TE-premium bonuses like bonus_rec_te are honored)
     when the draft is linked to one, else a standard PPR fallback."""
     if league_id and league_id != '0':
-        return sleeper.League(league_id).get_league()['scoring_settings']
+        return Data.get_league(int(league_id)).get_league()['scoring_settings']
     return DEFAULT_SCORING
 
 
@@ -732,22 +743,30 @@ def build_my_roster(picks: list[dict], user_id: str, bye_weeks: dict[str, int]) 
 
 
 
-def _best_lineup_score(positions: pd.Series, scores: pd.Series,
+def _best_lineup_score(positions: pd.Series | list[str], scores: pd.Series | list[float],
                        slots: list[str]) -> float:
+    if isinstance(positions, pd.Series):
+        position_values = positions.to_numpy()
+    else:
+        position_values = positions
+    if isinstance(scores, pd.Series):
+        aligned_scores = scores.reindex(positions.index if isinstance(positions, pd.Series) else range(len(scores))).fillna(0.0)
+        score_values = aligned_scores.to_numpy()
+    else:
+        score_values = scores
+
     states = {0: 0.0}
-    # Align scores to positions index so positional order matches score values
-    aligned_scores = scores.reindex(positions.index).fillna(0.0)
-    position_values = positions.to_numpy()
-    score_values = aligned_scores.to_numpy()
     for slot in slots:
+        slot_eligible = SLOT_ELIGIBILITY[slot]
         next_states = {}
         for mask, total in states.items():
             for index, position in enumerate(position_values):
-                if mask & (1 << index) or position not in SLOT_ELIGIBILITY[slot]:
+                if mask & (1 << index) or position not in slot_eligible:
                     continue
                 candidate = total + score_values[index]
                 next_mask = mask | (1 << index)
-                next_states[next_mask] = max(next_states.get(next_mask, 0.0), candidate)
+                if candidate > next_states.get(next_mask, 0.0):
+                    next_states[next_mask] = candidate
         states = next_states
     return max(states.values(), default=0.0)
 
@@ -763,7 +782,9 @@ def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
         for slot, count in settings.slots.items()
         for _ in range(count)
     ]
-    roster_scores = weekly_points.reindex(my_roster.index)
+    roster_positions = my_roster['position'].tolist() if not my_roster.empty else []
+    roster_indices = my_roster.index.tolist() if not my_roster.empty else []
+    weekly_dict = {w: weekly_points[w].to_dict() for w in weekly_points.columns}
     playoff_weight = 1.5 if playoff_week_start is not None else 1.0
     total_weight = 0.0
     for week in weekly_points.columns:
@@ -771,11 +792,12 @@ def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
                   if playoff_week_start is not None and week >= playoff_week_start
                   else 1.0)
         total_weight += weight
-        scores = roster_scores[week] if week in roster_scores else pd.Series(dtype=float)
-        baseline = _best_lineup_score(my_roster['position'], scores, slots)
+        w_dict = weekly_dict.get(week, {})
+        scores = [float(w_dict.get(pid, 0.0)) for pid in roster_indices]
+        baseline = _best_lineup_score(roster_positions, scores, slots)
         without_slot = [
             _best_lineup_score(
-                my_roster['position'], scores, slots[:index] + slots[index + 1:])
+                roster_positions, scores, slots[:index] + slots[index + 1:])
             for index in range(len(slots))
         ]
         candidate_scores = weekly_points[week].reindex(undrafted.index).fillna(0.0)
@@ -925,7 +947,7 @@ class Context:
         return leagues
 
     def __init__(self):
-        current = sleeper.get_sport_state('nfl')
+        current = get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
         is_regular_season = current['season_type'] == 'regular'
@@ -976,7 +998,7 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     data = DraftData(draft_id=draft_id)
     settings = DraftSettings.from_draft(data.draft)
     scoring = fetch_draft_scoring(data.draft.get('league_id'))
-    season = int(data.draft.get('season') or sleeper.get_sport_state('nfl')['league_season'])
+    season = int(data.draft.get('season') or get_sport_state('nfl')['league_season'])
     weekly_points, _ = build_projection_inputs(season, scoring)
     projections = build_season_projections(season, scoring)
     bye_weeks = Data.get_bye_weeks(season)
@@ -1020,7 +1042,7 @@ def render_draft_assistant(username: str):
         st.info("Enter your Sleeper username in the sidebar to find your drafts.")
         return
 
-    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    season = int(get_sport_state('nfl')['league_season'])
     try:
         user_id, drafts = get_user_drafts(username, season)
     except Exception as exc:  # noqa: BLE001 - surface any Sleeper lookup failure
@@ -1178,23 +1200,28 @@ def compute_waiver_add_drop_recommendations(
     }
     total_weight = sum(weights.values())
 
+    weekly_points_dict = {
+        w: weekly_points[w].to_dict()
+        for w in weeks
+        if w in weekly_points.columns
+    }
+
     roster_indices = my_roster.index.tolist() if not my_roster.empty else []
+    roster_positions = my_roster['position'].tolist() if not my_roster.empty else []
 
     baseline_scores = {}
     baseline_minus_D = {}
     without_slot_minus_D = {}
 
     for w in weeks:
-        w_scores = weekly_points[w]
+        w_dict = weekly_points_dict.get(w, {})
         if roster_indices:
-            r_positions = my_roster['position']
-            r_scores = w_scores.reindex(roster_indices).fillna(0.0)
-            baseline_scores[w] = _best_lineup_score(r_positions, r_scores, slots)
+            r_scores = [float(w_dict.get(rid, 0.0)) for rid in roster_indices]
+            baseline_scores[w] = _best_lineup_score(roster_positions, r_scores, slots)
 
-            for d_id in roster_indices:
-                r_sub = my_roster.drop(index=d_id)
-                sub_positions = r_sub['position']
-                sub_scores = w_scores.reindex(r_sub.index).fillna(0.0)
+            for d_idx, d_id in enumerate(roster_indices):
+                sub_positions = roster_positions[:d_idx] + roster_positions[d_idx + 1:]
+                sub_scores = r_scores[:d_idx] + r_scores[d_idx + 1:]
                 baseline_minus_D[(w, d_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
                 without_slot_minus_D[(w, d_id)] = [
                     _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
@@ -1206,11 +1233,23 @@ def compute_waiver_add_drop_recommendations(
     if projections is None:
         projections = pd.DataFrame()
 
+    unique_candidate_positions = waiver_pool['position'].unique()
+    eligible_indices_by_pos = {
+        pos: [i for i, s in enumerate(slots) if pos in SLOT_ELIGIBILITY[s]]
+        for pos in unique_candidate_positions
+    }
+
+    max_without_slot = {}
+    for pos_A, elig_idx in eligible_indices_by_pos.items():
+        if elig_idx:
+            for (w, d_id), w_slots in without_slot_minus_D.items():
+                max_without_slot[(w, d_id, pos_A)] = max(w_slots[i] for i in elig_idx)
+
     recs = []
 
     for a_id, a_row in waiver_pool.iterrows():
         pos_A = a_row['position']
-        eligible_indices = [i for i, s in enumerate(slots) if pos_A in SLOT_ELIGIBILITY[s]]
+        elig_idx = eligible_indices_by_pos[pos_A]
 
         a_first = a_row.get('first_name', '')
         a_last = a_row.get('last_name', '')
@@ -1226,12 +1265,12 @@ def compute_waiver_add_drop_recommendations(
             for d_id in roster_indices:
                 weighted_uplift_sum = 0.0
                 for w in weeks:
-                    score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
+                    w_dict = weekly_points_dict.get(w, {})
+                    score_A = float(w_dict.get(a_id, 0.0))
                     base_sub = baseline_minus_D[(w, d_id)]
-                    if eligible_indices:
-                        w_slots = without_slot_minus_D[(w, d_id)]
-                        best_with_A = max(w_slots[i] + score_A for i in eligible_indices)
-                        new_score = max(base_sub, best_with_A)
+                    if elig_idx:
+                        max_slot = max_without_slot[(w, d_id, pos_A)]
+                        new_score = max(base_sub, max_slot + score_A)
                     else:
                         new_score = base_sub
                     net_w = new_score - baseline_scores[w]
@@ -1270,8 +1309,9 @@ def compute_waiver_add_drop_recommendations(
         else:
             weighted_uplift_sum = 0.0
             for w in weeks:
-                score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
-                new_score = score_A if eligible_indices else 0.0
+                w_dict = weekly_points_dict.get(w, {})
+                score_A = float(w_dict.get(a_id, 0.0))
+                new_score = score_A if elig_idx else 0.0
                 weighted_uplift_sum += weights[w] * new_score
 
             avg_uplift = weighted_uplift_sum / total_weight
@@ -1338,7 +1378,7 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
 
     user_roster = waiver_data.rosters.loc[[roster_id]]
     user_players = user_roster['players'].iloc[0]
-    league = sleeper.League(int(league_id))
+    league = Data.get_league(int(league_id))
     try:
         settings = DraftSettings.from_draft(league.get_league())
     except (KeyError, AttributeError):
@@ -1391,7 +1431,7 @@ def render_waiver_guide(username: str, week: int):
         st.info("Enter your Sleeper username in the sidebar to find your leagues.")
         return
 
-    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    season = int(get_sport_state('nfl')['league_season'])
     try:
         user_id, all_leagues = get_user_leagues(username, season)
     except Exception as exc:  # noqa: BLE001
