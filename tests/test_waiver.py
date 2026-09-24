@@ -242,6 +242,46 @@ def test_compute_waiver_value_includes_all_output_columns():
     assert expected_cols.issubset(set(result.columns))
 
 
+def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):
+    import streamlit_app
+
+    class MockWaiverData:
+        def __init__(self, league_id, week):
+            self.rosters = pd.DataFrame([{'owner_id': 'u1', 'players': ['p1']}])
+            self.waiver_settings = {}
+
+        def get_user_roster_id(self, user_id):
+            return 0
+
+        def get_free_agent_player_ids(self, all_ids):
+            return {'fa1'}
+
+        def get_user_waiver_rank(self, user_id):
+            return 1
+
+    monkeypatch.setattr(streamlit_app, 'WaiverData', MockWaiverData)
+    monkeypatch.setattr(streamlit_app.sleeper, 'League', lambda league_id: type('MockLeague', (), {'get_league': lambda self: {'settings': {}}})())
+    monkeypatch.setattr(streamlit_app.DraftSettings, 'from_draft', classmethod(lambda cls, d: DraftSettings(teams=12, slots={'QB': 1})))
+    monkeypatch.setattr(streamlit_app, 'fetch_draft_scoring', lambda lid: {})
+    monkeypatch.setattr(streamlit_app.Data, 'get_bye_weeks', lambda s: {})
+    monkeypatch.setattr(streamlit_app, 'build_season_projections', lambda s, sc: pd.DataFrame({'p50_weekly': [10.0, 10.0], 'p90_weekly': [15.0, 15.0]}, index=['fa1', 'p1']))
+    monkeypatch.setattr(streamlit_app.Data, 'get_players', lambda: pd.DataFrame({'position': ['QB', 'QB'], 'first_name': ['A', 'B'], 'last_name': ['a', 'b'], 'team': ['T1', 'T2']}, index=['fa1', 'p1']))
+    monkeypatch.setattr(streamlit_app, 'build_waiver_pool', lambda proj, setts, fa_ids, byes: pd.DataFrame({'position': ['QB']}, index=['fa1']))
+    monkeypatch.setattr(streamlit_app, 'build_my_roster', lambda picks, uid, byes: pd.DataFrame({'position': ['QB']}, index=['p1']))
+    monkeypatch.setattr(streamlit_app, 'build_projection_inputs', lambda s, sc: (pd.DataFrame({1: {'fa1': 10.0, 'p1': 10.0}}), pd.Series()))
+    monkeypatch.setattr(streamlit_app, 'compute_waiver_add_drop_recommendations', lambda *args, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(streamlit_app, 'render_waiver_pool', lambda recs: None)
+
+    captions = []
+    monkeypatch.setattr(streamlit_app.st, 'caption', lambda msg: captions.append(msg))
+
+    assert hasattr(streamlit_app._waiver_guide_league_fragment, '__wrapped__')
+    streamlit_app._waiver_guide_league_fragment.__wrapped__('123', 'u1', 2026, 1)
+
+    assert any("Waiver rank #1 of 12" in c for c in captions)
+    assert not any("refreshes every" in c for c in captions)
+
+
 # --- compute_waiver_add_drop_recommendations ---
 
 def test_compute_waiver_add_drop_recommendations_improves_team():

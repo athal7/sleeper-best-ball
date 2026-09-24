@@ -1324,6 +1324,7 @@ def render_waiver_pool(recommendations: pd.DataFrame):
     st.dataframe(styled, hide_index=True, height=600, column_order=display.columns.tolist())
 
 
+@st.fragment
 def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, week: int):
     try:
         waiver_data = WaiverData(league_id=int(league_id), week=week)
@@ -1377,9 +1378,7 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
         projections=projections, playoff_week_start=playoff_week_start,
         current_week=week)
 
-    st.caption(
-        f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams} "
-        f"· refreshes every {DRAFT_TTL}s")
+    st.caption(f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams}")
     st.caption(
         f"Showing recommendations that improve your team's projected lineup score.")
     render_waiver_pool(recs)
