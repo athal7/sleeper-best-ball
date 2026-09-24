@@ -5,6 +5,7 @@ from streamlit_app import (
     build_waiver_pool,
     compute_waiver_value,
     compute_waiver_add_drop_recommendations,
+    render_waiver_pool,
     DraftSettings,
     compute_upside_bonus,
     UPSIDE_WEIGHT,
@@ -242,6 +243,75 @@ def test_compute_waiver_value_includes_all_output_columns():
     assert expected_cols.issubset(set(result.columns))
 
 
+# --- render_waiver_pool ---
+
+def test_render_waiver_pool_empty(monkeypatch):
+    import streamlit_app
+
+    info_calls = []
+    monkeypatch.setattr(streamlit_app.st, 'info', lambda msg: info_calls.append(msg))
+    monkeypatch.setattr(streamlit_app.st, 'subheader', lambda msg: None)
+
+    render_waiver_pool(pd.DataFrame())
+
+    assert info_calls == ["None"]
+
+
+def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatch):
+    import streamlit_app
+
+    markdown_calls = []
+    monkeypatch.setattr(streamlit_app.st, 'markdown', lambda text: markdown_calls.append(text))
+    monkeypatch.setattr(streamlit_app.st, 'subheader', lambda msg: None)
+
+    recs = pd.DataFrame([
+        {
+            'add_player_id': '101',
+            'add_name': 'Add One',
+            'add_position': 'WR',
+            'add_team': 'KC',
+            'add_p50': 12.5,
+            'add_p90': 18.0,
+            'drop_player_id': '201',
+            'drop_name': 'Drop One',
+            'drop_position': 'WR',
+            'drop_team': 'NYJ',
+            'drop_p50': 5.0,
+            'drop_p90': 8.0,
+            'uplift': 7.5,
+        },
+        {
+            'add_player_id': '102',
+            'add_name': 'Add Two',
+            'add_position': 'RB',
+            'add_team': 'SF',
+            'add_p50': 10.0,
+            'add_p90': 15.0,
+            'drop_player_id': None,
+            'drop_name': 'None',
+            'drop_position': '',
+            'drop_team': '',
+            'drop_p50': 0.0,
+            'drop_p90': 0.0,
+            'uplift': 3.0,
+        },
+    ])
+
+    render_waiver_pool(recs)
+
+    # Check drop headers rendered
+    assert any("Drop **Drop One**" in m for m in markdown_calls)
+    assert any("Add Without Dropping" in m for m in markdown_calls)
+
+    # Check player links rendered with Sleeper URLs
+    assert any("[Add One](https://sleeper.com/players/nfl/101)" in m for m in markdown_calls)
+    assert any("[Add Two](https://sleeper.com/players/nfl/102)" in m for m in markdown_calls)
+
+    # Check uplift formatted
+    assert any("+7.5 pts" in m for m in markdown_calls)
+    assert any("+3.0 pts" in m for m in markdown_calls)
+
+
 def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):
     import streamlit_app
 
@@ -260,7 +330,7 @@ def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):
             return 1
 
     monkeypatch.setattr(streamlit_app, 'WaiverData', MockWaiverData)
-    monkeypatch.setattr(streamlit_app.sleeper, 'League', lambda league_id: type('MockLeague', (), {'get_league': lambda self: {'settings': {}}})())
+    monkeypatch.setattr(streamlit_app.Data, 'get_league', staticmethod(lambda league_id: type('MockLeague', (), {'get_league': lambda self: {'settings': {}}})()))
     monkeypatch.setattr(streamlit_app.DraftSettings, 'from_draft', classmethod(lambda cls, d: DraftSettings(teams=12, slots={'QB': 1})))
     monkeypatch.setattr(streamlit_app, 'fetch_draft_scoring', lambda lid: {})
     monkeypatch.setattr(streamlit_app.Data, 'get_bye_weeks', lambda s: {})

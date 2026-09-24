@@ -1340,28 +1340,56 @@ def compute_waiver_add_drop_recommendations(
 
 
 def render_waiver_pool(recommendations: pd.DataFrame):
-    """Render waiver recommendations as a sortable dataframe."""
+    """Render waiver recommendations grouped by recommended drop player."""
     st.subheader("Waiver Recommendations")
     if recommendations.empty:
         st.info("None")
         return
 
-    display = recommendations[[
-        'add_name', 'add_position', 'add_team', 'add_p50', 'add_p90',
-        'drop_name', 'drop_position', 'drop_team', 'drop_p50', 'drop_p90',
-        'uplift'
-    ]].copy()
-    display.columns = [
-        'Add Player', 'Add Pos', 'Add Team', 'Add P50', 'Add P90',
-        'Drop Player', 'Drop Pos', 'Drop Team', 'Drop P50', 'Drop P90',
-        'Uplift'
-    ]
-    styled = display.style.format({
-        'Add P50': '{:.1f}', 'Add P90': '{:.1f}',
-        'Drop P50': '{:.1f}', 'Drop P90': '{:.1f}',
-        'Uplift': '{:.1f}',
-    })
-    st.dataframe(styled, hide_index=True, height=600, column_order=display.columns.tolist())
+    recs = recommendations.sort_values(by='uplift', ascending=False) if 'uplift' in recommendations.columns else recommendations
+
+    drop_groups = {}
+    for _, row in recs.iterrows():
+        drop_id = row.get('drop_player_id')
+        if drop_id not in drop_groups:
+            drop_groups[drop_id] = {
+                'drop_name': row.get('drop_name', 'None'),
+                'drop_position': row.get('drop_position', ''),
+                'drop_team': row.get('drop_team', ''),
+                'drop_p50': row.get('drop_p50', 0.0),
+                'drop_p90': row.get('drop_p90', 0.0),
+                'adds': [],
+            }
+        drop_groups[drop_id]['adds'].append(row)
+
+    for drop_id, group in drop_groups.items():
+        if drop_id and group['drop_name'] != 'None':
+            drop_info = f"Drop **{group['drop_name']}**"
+            if group['drop_position'] or group['drop_team']:
+                pos_team = f"{group['drop_position']} - {group['drop_team']}".strip(" -")
+                drop_info += f" ({pos_team})"
+            if group['drop_p50'] > 0 or group['drop_p90'] > 0:
+                drop_info += f" · P50: {group['drop_p50']:.1f} / P90: {group['drop_p90']:.1f}"
+        else:
+            drop_info = "Add Without Dropping"
+
+        st.markdown(f"#### {drop_info}")
+        for add_row in group['adds']:
+            add_id = add_row.get('add_player_id', '')
+            add_name = add_row.get('add_name', 'Unknown Player')
+            add_pos = add_row.get('add_position', '')
+            add_team = add_row.get('add_team', '')
+            add_p50 = add_row.get('add_p50', 0.0)
+            add_p90 = add_row.get('add_p90', 0.0)
+            uplift = add_row.get('uplift', 0.0)
+
+            url = f"https://sleeper.com/players/nfl/{add_id}" if add_id else "#"
+            pos_team_str = f"({add_pos} - {add_team})" if add_pos or add_team else ""
+            player_link = f"[{add_name}]({url})" if add_id else f"**{add_name}**"
+
+            st.markdown(
+                f"- {player_link} {pos_team_str} · **+{uplift:.1f} pts** uplift · P50: {add_p50:.1f} / P90: {add_p90:.1f}"
+            )
 
 
 @st.fragment
