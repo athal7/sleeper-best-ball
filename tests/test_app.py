@@ -24,6 +24,15 @@ def test_by_username_query_param():
     assert any(league_id in m.value for m in at.markdown)
 
 
+def test_trade_suggestions_mode_query_param():
+    at = _app()
+    at.query_params['mode'] = "Trade Suggestions"
+    at.run()
+    assert not at.exception
+    assert any("Enter your Sleeper username" in m.value for m in at.info)
+    assert any("Trade Suggestions" in t.value for t in at.title)
+
+
 def test_render_waiver_guide_renders_multiple_leagues(monkeypatch):
     import streamlit_app
 
