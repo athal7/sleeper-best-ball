@@ -304,12 +304,8 @@ def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatc
     assert any("Add Without Dropping" in m for m in markdown_calls)
 
     # Check player links rendered with Sleeper URLs
-    assert any("[Add One](https://sleeper.com/players/nfl/101)" in m for m in markdown_calls)
-    assert any("[Add Two](https://sleeper.com/players/nfl/102)" in m for m in markdown_calls)
-
-    # Check uplift formatted
-    assert any("+7.5 pts" in m for m in markdown_calls)
-    assert any("+3.0 pts" in m for m in markdown_calls)
+    assert any("[Add One](https://sleeper.app/players/nfl/101)" in m for m in markdown_calls)
+    assert any("[Add Two](https://sleeper.app/players/nfl/102)" in m for m in markdown_calls)
 
 
 def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):

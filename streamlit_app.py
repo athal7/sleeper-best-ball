@@ -1364,12 +1364,9 @@ def render_waiver_pool(recommendations: pd.DataFrame):
 
     for drop_id, group in drop_groups.items():
         if drop_id and group['drop_name'] != 'None':
-            drop_info = f"Drop **{group['drop_name']}**"
-            if group['drop_position'] or group['drop_team']:
-                pos_team = f"{group['drop_position']} - {group['drop_team']}".strip(" -")
-                drop_info += f" ({pos_team})"
-            if group['drop_p50'] > 0 or group['drop_p90'] > 0:
-                drop_info += f" · P50: {group['drop_p50']:.1f} / P90: {group['drop_p90']:.1f}"
+            drop_pos_team = f" ({group['drop_position']} - {group['drop_team']})" if group['drop_position'] or group['drop_team'] else ""
+            drop_stats = f" · P50: {group['drop_p50']:.1f} / P90: {group['drop_p90']:.1f}" if group['drop_p50'] > 0 or group['drop_p90'] > 0 else ""
+            drop_info = f"Drop **{group['drop_name']}**{drop_pos_team}{drop_stats}"
         else:
             drop_info = "Add Without Dropping"
 
@@ -1383,13 +1380,17 @@ def render_waiver_pool(recommendations: pd.DataFrame):
             add_p90 = add_row.get('add_p90', 0.0)
             uplift = add_row.get('uplift', 0.0)
 
-            url = f"https://sleeper.com/players/nfl/{add_id}" if add_id else "#"
+            url = f"https://sleeper.app/players/nfl/{add_id}" if add_id else "#"
             pos_team_str = f"({add_pos} - {add_team})" if add_pos or add_team else ""
             player_link = f"[{add_name}]({url})" if add_id else f"**{add_name}**"
 
-            st.markdown(
-                f"- {player_link} {pos_team_str} · **+{uplift:.1f} pts** uplift · P50: {add_p50:.1f} / P90: {add_p90:.1f}"
-            )
+            with st.container(border=True):
+                col_player, col_uplift = st.columns([3, 1])
+                with col_player:
+                    st.markdown(f"➕ {player_link} {pos_team_str}")
+                    st.caption(f"P50: {add_p50:.1f} pts  ·  P90: {add_p90:.1f} pts")
+                with col_uplift:
+                    st.metric(label="Lineup Uplift", value=f"+{uplift:.1f} pts")
 
 
 @st.fragment
