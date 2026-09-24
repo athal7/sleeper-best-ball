@@ -304,18 +304,19 @@ def test_build_season_projections_skips_empty_weeks(monkeypatch):
     assert result.loc['1', 'p90_weekly'] == pytest.approx(4.0)
 
 
+class FakeLeagueForScoring:
+    def __init__(self, league_id):
+        self.league_id = league_id
+
+    def get_league(self):
+        return {'scoring_settings': {'bonus_rec_te': 0.5}}
+
+
 def test_fetch_draft_scoring_uses_real_league_when_linked(monkeypatch):
     from streamlit_app import fetch_draft_scoring
     import sleeper_wrapper as sleeper
 
-    class FakeLeague:
-        def __init__(self, league_id):
-            self.league_id = league_id
-
-        def get_league(self):
-            return {'scoring_settings': {'bonus_rec_te': 0.5}}
-
-    monkeypatch.setattr(sleeper, 'League', FakeLeague)
+    monkeypatch.setattr(sleeper, 'League', FakeLeagueForScoring)
     scoring = fetch_draft_scoring('123')
     assert scoring == {'bonus_rec_te': 0.5}
 
