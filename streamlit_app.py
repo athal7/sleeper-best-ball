@@ -2,8 +2,11 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import requests
+import re
 from dataclasses import InitVar, dataclass, field
+from itertools import combinations
 from typing import Optional, List
+from urllib.parse import quote
 from yattag import Doc
 
 import sleeper_wrapper as sleeper
@@ -1361,167 +1364,124 @@ def compute_trade_recommendations(
     playoff_week_start: int | None = None,
     current_week: int = 1,
 ) -> pd.DataFrame:
-    """Compute 1-for-1 trade recommendations with all opponent managers in the league.
+    """Find win-win swaps of one or two players per team across remaining weeks.
 
-    Evaluates rest-of-season starting lineup uplift for both the user's team (my_uplift)
-    and the trade partner's team (partner_uplift) when swapping a player D from my_roster
-    for a player A from the opponent's roster.
+    Every single-player swap is scored. Package searches use the eight highest
+    projected players on each roster to bound the pairwise combinations.
     """
     if my_roster.empty or not opponent_rosters:
         return pd.DataFrame()
 
-    slots = [
-        slot
-        for slot, count in settings.slots.items()
-        for _ in range(count)
-    ]
-
+    slots = [slot for slot, count in settings.slots.items() for _ in range(count)]
     weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS and w >= current_week]
     if not weeks:
         return pd.DataFrame()
 
-    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
-    weights = {
-        w: (playoff_weight if playoff_week_start is not None and w >= playoff_week_start else 1.0)
-        for w in weeks
-    }
-    total_weight = sum(weights.values())
-
+    weights = np.array([1.5 if playoff_week_start is not None and w >= playoff_week_start else 1.0
+                        for w in weeks])
+    total_weight = weights.sum()
+    scores = [weekly_points[w].fillna(0.0).to_dict() for w in weeks]
     if projections is None:
         projections = pd.DataFrame()
 
-    my_indices = my_roster.index.tolist()
+    def player_info(roster):
+        info = {}
+        for player_id, row in roster.iterrows():
+            first, last = row.get('first_name', ''), row.get('last_name', '')
+            projected = projections.loc[player_id] if player_id in projections.index else {}
+            p50 = row.get('p50_weekly', projected.get('p50_weekly', 0.0))
+            p90 = row.get('p90_weekly', projected.get('p90_weekly', 0.0))
+            info[player_id] = {
+                'id': player_id,
+                'name': f"{first} {last}".strip() or str(player_id),
+                'position': row['position'],
+                'team': row.get('team', ''),
+                'p50': float(p50) if pd.notna(p50) else 0.0,
+                'p90': float(p90) if pd.notna(p90) else 0.0,
+            }
+        return info
 
-    my_baseline_scores = {}
-    my_base_minus_D = {}
-    my_without_slot_minus_D = {}
+    def packages(roster):
+        ids = roster.index.tolist()
+        ranked = sorted(ids, key=lambda pid: sum(weight * week.get(pid, 0.0)
+                                                  for weight, week in zip(weights, scores)), reverse=True)
+        return [(pid,) for pid in ids] + list(combinations(ranked[:8], 2))
 
-    for w in weeks:
-        w_scores = weekly_points[w]
-        r_positions = my_roster['position']
-        r_scores = w_scores.reindex(my_indices).fillna(0.0)
-        my_baseline_scores[w] = _best_lineup_score(r_positions, r_scores, slots)
+    def roster_states(roster, info, choices):
+        ids = roster.index.tolist()
+        baseline = [_best_lineup_score(roster['position'],
+                                       [week.get(pid, 0.0) for pid in ids], slots)
+                    for week in scores]
+        states = {}
+        for outgoing in choices:
+            removed = set(outgoing)
+            remaining = [pid for pid in ids if pid not in removed]
+            states[outgoing] = (
+                np.array([info[pid]['position'] for pid in remaining]),
+                np.array([info[pid]['position'] for pid in outgoing]),
+                [(np.array([week.get(pid, 0.0) for pid in remaining]),
+                  np.array([week.get(pid, 0.0) for pid in outgoing])) for week in scores],
+            )
+        return baseline, states
 
-        for d_id in my_indices:
-            r_sub = my_roster.drop(index=d_id)
-            sub_positions = r_sub['position']
-            sub_scores = w_scores.reindex(r_sub.index).fillna(0.0)
-            my_base_minus_D[(w, d_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
-            my_without_slot_minus_D[(w, d_id)] = [
-                _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
-                for i in range(len(slots))
-            ]
-
-    opp_baseline_scores = {}
-    opp_base_minus_A = {}
-    opp_without_slot_minus_A = {}
-
-    for opp_id, opp_data in opponent_rosters.items():
-        opp_roster = opp_data.get('roster')
-        if opp_roster is None or opp_roster.empty:
-            continue
-        opp_indices = opp_roster.index.tolist()
-        opp_positions = opp_roster['position']
-
-        for w in weeks:
-            w_scores = weekly_points[w]
-            o_scores = w_scores.reindex(opp_indices).fillna(0.0)
-            opp_baseline_scores[(opp_id, w)] = _best_lineup_score(opp_positions, o_scores, slots)
-
-            for a_id in opp_indices:
-                o_sub = opp_roster.drop(index=a_id)
-                sub_positions = o_sub['position']
-                sub_scores = w_scores.reindex(o_sub.index).fillna(0.0)
-                opp_base_minus_A[(opp_id, w, a_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
-                opp_without_slot_minus_A[(opp_id, w, a_id)] = [
-                    _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
-                    for i in range(len(slots))
-                ]
-
+    my_info = player_info(my_roster)
+    my_choices = packages(my_roster)
+    my_baseline, my_states = roster_states(my_roster, my_info, my_choices)
     recs = []
-
     for opp_id, opp_data in opponent_rosters.items():
         opp_roster = opp_data.get('roster')
         if opp_roster is None or opp_roster.empty:
             continue
         opp_name = opp_data.get('name') or opp_data.get('username') or str(opp_id)
+        opp_info = player_info(opp_roster)
+        opp_choices = packages(opp_roster)
+        opp_baseline, opp_states = roster_states(opp_roster, opp_info, opp_choices)
 
-        for d_id in my_indices:
-            d_row = my_roster.loc[d_id]
-            pos_D = d_row['position']
-            eligible_indices_D = [i for i, s in enumerate(slots) if pos_D in SLOT_ELIGIBILITY[s]]
+        for give in my_choices:
+            my_pos, give_pos, my_weeks = my_states[give]
+            for receive in opp_choices:
+                opp_pos, receive_pos, opp_weeks = opp_states[receive]
+                new_my_pos = np.concatenate((my_pos, receive_pos))
+                new_opp_pos = np.concatenate((opp_pos, give_pos))
+                my_sum = partner_sum = 0.0
+                for i, weight in enumerate(weights):
+                    my_remaining, given_scores = my_weeks[i]
+                    opp_remaining, received_scores = opp_weeks[i]
+                    new_my = _best_lineup_score(new_my_pos,
+                                                np.concatenate((my_remaining, received_scores)), slots)
+                    new_partner = _best_lineup_score(new_opp_pos,
+                                                     np.concatenate((opp_remaining, given_scores)), slots)
+                    my_sum += weight * (new_my - my_baseline[i])
+                    partner_sum += weight * (new_partner - opp_baseline[i])
+                if my_sum <= 0 or partner_sum <= 0:
+                    continue
 
-            d_first = d_row.get('first_name', '')
-            d_last = d_row.get('last_name', '')
-            d_name = f"{d_first} {d_last}".strip() if (d_first or d_last) else str(d_id)
-            d_team = d_row.get('team', '')
-            d_p50 = float(d_row.get('p50_weekly', projections.loc[d_id, 'p50_weekly'] if d_id in projections.index else 0.0))
-            d_p90 = float(d_row.get('p90_weekly', projections.loc[d_id, 'p90_weekly'] if d_id in projections.index else 0.0))
-
-            for a_id in opp_roster.index:
-                a_row = opp_roster.loc[a_id]
-                pos_A = a_row['position']
-                eligible_indices_A = [i for i, s in enumerate(slots) if pos_A in SLOT_ELIGIBILITY[s]]
-
-                a_first = a_row.get('first_name', '')
-                a_last = a_row.get('last_name', '')
-                a_name = f"{a_first} {a_last}".strip() if (a_first or a_last) else str(a_id)
-                a_team = a_row.get('team', '')
-                a_p50 = float(a_row.get('p50_weekly', projections.loc[a_id, 'p50_weekly'] if a_id in projections.index else 0.0))
-                a_p90 = float(a_row.get('p90_weekly', projections.loc[a_id, 'p90_weekly'] if a_id in projections.index else 0.0))
-
-                my_weighted_sum = 0.0
-                opp_weighted_sum = 0.0
-
-                for w in weeks:
-                    score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
-                    score_D = float(weekly_points[w].get(d_id, 0.0)) if d_id in weekly_points[w].index else 0.0
-
-                    # My Team receive A, give D
-                    my_base_sub = my_base_minus_D[(w, d_id)]
-                    if eligible_indices_A:
-                        my_w_slots = my_without_slot_minus_D[(w, d_id)]
-                        my_best_with_A = max(my_w_slots[i] + score_A for i in eligible_indices_A)
-                        my_new = max(my_base_sub, my_best_with_A)
-                    else:
-                        my_new = my_base_sub
-                    my_net = my_new - my_baseline_scores[w]
-                    my_weighted_sum += weights[w] * my_net
-
-                    # Opponent receive D, give A
-                    opp_base_sub = opp_base_minus_A[(opp_id, w, a_id)]
-                    if eligible_indices_D:
-                        opp_w_slots = opp_without_slot_minus_A[(opp_id, w, a_id)]
-                        opp_best_with_D = max(opp_w_slots[i] + score_D for i in eligible_indices_D)
-                        opp_new = max(opp_base_sub, opp_best_with_D)
-                    else:
-                        opp_new = opp_base_sub
-                    opp_net = opp_new - opp_baseline_scores[(opp_id, w)]
-                    opp_weighted_sum += weights[w] * opp_net
-
-                my_uplift = my_weighted_sum / total_weight
-                partner_uplift = opp_weighted_sum / total_weight
-
-                if my_uplift > 0 and partner_uplift > 0:
-                    recs.append({
-                        'partner_id': opp_id,
-                        'partner_name': opp_name,
-                        'give_player_id': d_id,
-                        'give_name': d_name,
-                        'give_position': pos_D,
-                        'give_team': d_team,
-                        'give_p50': d_p50,
-                        'give_p90': d_p90,
-                        'receive_player_id': a_id,
-                        'receive_name': a_name,
-                        'receive_position': pos_A,
-                        'receive_team': a_team,
-                        'receive_p50': a_p50,
-                        'receive_p90': a_p90,
-                        'my_uplift': my_uplift,
-                        'partner_uplift': partner_uplift,
-                        'total_uplift': my_uplift + partner_uplift,
-                    })
+                my_uplift = my_sum / total_weight
+                partner_uplift = partner_sum / total_weight
+                single = len(give) == len(receive) == 1
+                d = my_info[give[0]]
+                a = opp_info[receive[0]]
+                recs.append({
+                    'partner_id': opp_id,
+                    'partner_name': opp_name,
+                    'give_players': tuple(my_info[pid] for pid in give),
+                    'receive_players': tuple(opp_info[pid] for pid in receive),
+                    'give_player_id': d['id'] if single else None,
+                    'give_name': d['name'] if single else None,
+                    'give_position': d['position'] if single else None,
+                    'give_team': d['team'] if single else None,
+                    'give_p50': d['p50'] if single else None,
+                    'give_p90': d['p90'] if single else None,
+                    'receive_player_id': a['id'] if single else None,
+                    'receive_name': a['name'] if single else None,
+                    'receive_position': a['position'] if single else None,
+                    'receive_team': a['team'] if single else None,
+                    'receive_p50': a['p50'] if single else None,
+                    'receive_p90': a['p90'] if single else None,
+                    'my_uplift': my_uplift,
+                    'partner_uplift': partner_uplift,
+                    'total_uplift': my_uplift + partner_uplift,
+                })
 
     df = pd.DataFrame(recs)
     if not df.empty:
@@ -1530,15 +1490,22 @@ def compute_trade_recommendations(
     return df
 
 
+def sleeper_player_link(name: str, player_id: str) -> str:
+    """Link to the Sleeper web profile, not the player JSON endpoint."""
+    if not player_id:
+        return f"**{name}**"
+    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    return f"[{name}](https://sleeper.com/nfl/players/{slug}-{quote(str(player_id), safe='')})"
+
+
 def render_waiver_pool(recommendations: pd.DataFrame):
-    """Render waiver recommendations grouped by recommended drop player."""
-    st.subheader("Waiver Recommendations")
+    """Render the best adds under the player each would replace."""
+    st.subheader("Recommended moves")
     if recommendations.empty:
-        st.info("None")
+        st.info("No lineup-improving waiver moves this week.")
         return
 
     recs = recommendations.sort_values(by='uplift', ascending=False) if 'uplift' in recommendations.columns else recommendations
-
     drop_groups = {}
     for _, row in recs.iterrows():
         drop_id = row.get('drop_player_id')
@@ -1556,12 +1523,18 @@ def render_waiver_pool(recommendations: pd.DataFrame):
     for drop_id, group in drop_groups.items():
         if drop_id and group['drop_name'] != 'None':
             drop_pos_team = f" ({group['drop_position']} - {group['drop_team']})" if group['drop_position'] or group['drop_team'] else ""
-            drop_stats = f" · P50: {group['drop_p50']:.1f} / P90: {group['drop_p90']:.1f}" if group['drop_p50'] > 0 or group['drop_p90'] > 0 else ""
-            drop_info = f"Drop **{group['drop_name']}**{drop_pos_team}{drop_stats}"
+            drop_info = f"Drop **{group['drop_name']}**{drop_pos_team}"
+            if group['drop_p50'] > 0 or group['drop_p90'] > 0:
+                drop_stats = f"Current player · P50 {group['drop_p50']:.1f} pts · P90 {group['drop_p90']:.1f} pts"
+            else:
+                drop_stats = None
         else:
             drop_info = "Add Without Dropping"
+            drop_stats = None
 
         st.markdown(f"#### {drop_info}")
+        if drop_stats:
+            st.caption(drop_stats)
         for add_row in group['adds']:
             add_id = add_row.get('add_player_id', '')
             add_name = add_row.get('add_name', 'Unknown Player')
@@ -1571,17 +1544,15 @@ def render_waiver_pool(recommendations: pd.DataFrame):
             add_p90 = add_row.get('add_p90', 0.0)
             uplift = add_row.get('uplift', 0.0)
 
-            url = f"https://sleeper.app/players/nfl/{add_id}" if add_id else "#"
             pos_team_str = f"({add_pos} - {add_team})" if add_pos or add_team else ""
-            player_link = f"[{add_name}]({url})" if add_id else f"**{add_name}**"
-
+            player_link = sleeper_player_link(add_name, add_id)
             with st.container(border=True):
-                col_player, col_uplift = st.columns([3, 1])
+                col_player, col_uplift = st.columns([2, 1])
                 with col_player:
-                    st.markdown(f"➕ {player_link} {pos_team_str}")
-                    st.caption(f"P50: {add_p50:.1f} pts  ·  P90: {add_p90:.1f} pts")
+                    st.markdown(f"**Add {player_link}** {pos_team_str}")
+                    st.caption(f"Weekly projection · P50 {add_p50:.1f} pts · P90 {add_p90:.1f} pts")
                 with col_uplift:
-                    st.metric(label="Lineup Uplift", value=f"+{uplift:.1f} pts")
+                    st.metric(label="Gain · pts/wk", value=f"+{uplift:.2f}")
 
 
 @st.fragment
@@ -1672,40 +1643,36 @@ def render_waiver_guide(username: str, week: int):
 
 
 def render_trade_suggestions_table(recommendations: pd.DataFrame):
-    """Render trade recommendations as a sortable dataframe."""
-    st.subheader("Trade Suggestions")
+    """Show the strongest win-win offers under each trade partner."""
+    st.subheader("Trade ideas by partner")
     if recommendations.empty:
         st.info("No mutually beneficial trade suggestions found.")
         return
 
-    partners = ["All Trade Partners"] + sorted(recommendations['partner_name'].unique().tolist())
-    selected_partner = st.selectbox("Filter by Trade Partner", partners, key=f"partner_{id(recommendations)}")
-
-    df = recommendations.copy()
-    if selected_partner != "All Trade Partners":
-        df = df[df['partner_name'] == selected_partner]
-
-    if df.empty:
-        st.info("No trade suggestions matching the selected filters.")
-        return
-
-    display = df[[
-        'partner_name',
-        'give_name', 'give_position', 'give_team', 'give_p50',
-        'receive_name', 'receive_position', 'receive_team', 'receive_p50',
-        'my_uplift', 'partner_uplift'
-    ]].copy()
-    display.columns = [
-        'Partner',
-        'Give Player', 'Give Pos', 'Give Team', 'Give P50',
-        'Receive Player', 'Receive Pos', 'Receive Team', 'Receive P50',
-        'Your Uplift', 'Partner Uplift'
-    ]
-    styled = display.style.format({
-        'Give P50': '{:.1f}', 'Receive P50': '{:.1f}',
-        'Your Uplift': '{:+.1f}', 'Partner Uplift': '{:+.1f}',
-    })
-    st.dataframe(styled, hide_index=True, height=600, column_order=display.columns.tolist())
+    for _, offers in recommendations.groupby('partner_id', sort=False):
+        partner = offers.iloc[0]['partner_name']
+        st.markdown(f"#### {partner}")
+        st.caption(f"Top {min(len(offers), 5)} of {len(offers)} mutually beneficial offers")
+        for _, offer in offers.head(5).iterrows():
+            with st.container(border=True):
+                give_col, receive_col = st.columns(2)
+                with give_col:
+                    st.markdown("**You give**")
+                    for player in offer['give_players']:
+                        st.markdown(f"{sleeper_player_link(player['name'], player['id'])} · {player['position']} {player['team']}")
+                        st.caption(f"P50 {player['p50']:.1f} · P90 {player['p90']:.1f} pts/wk")
+                with receive_col:
+                    st.markdown("**You receive**")
+                    for player in offer['receive_players']:
+                        st.markdown(f"{sleeper_player_link(player['name'], player['id'])} · {player['position']} {player['team']}")
+                        st.caption(f"P50 {player['p50']:.1f} · P90 {player['p90']:.1f} pts/wk")
+                your_gain, their_gain = st.columns(2)
+                with your_gain:
+                    st.metric("Your lineup gain", f"+{offer['my_uplift']:.1f} pts/wk")
+                with their_gain:
+                    st.metric("Their lineup gain", f"+{offer['partner_uplift']:.1f} pts/wk")
+                if len(offer['give_players']) != len(offer['receive_players']):
+                    st.caption("Uneven trade · the team receiving more players may need to free a roster spot.")
 
 
 def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int, week: int):
@@ -1777,11 +1744,11 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         projections=projections, playoff_week_start=playoff_week_start,
         current_week=week)
 
+    st.caption(f"Week {week} · Trade Analyzer")
     st.caption(
-        f"Week {week} · Trade Analyzer · refreshes every {DRAFT_TTL}s")
-    st.caption(
-        f"Evaluating 1-for-1 trades with all managers in your league. "
-        f"'Win-Win' trades improve both teams' projected rest-of-season starting lineup scores.")
+        "Win-win offers improve both teams' projected rest-of-season lineups. "
+        "Every 1-for-1 is evaluated; two-player packages use each team's "
+        "eight highest-projected candidates.")
     render_trade_suggestions_table(recs)
 
 

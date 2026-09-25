@@ -195,6 +195,70 @@ def test_compute_trade_recommendations_empty_inputs():
     assert compute_trade_recommendations(pd.DataFrame(), {}, weekly_points, settings).empty
     assert compute_trade_recommendations(pd.DataFrame({'position': ['RB']}, index=['p1']), {}, weekly_points, settings).empty
 
+def test_compute_trade_recommendations_includes_mutually_beneficial_packages():
+    settings = DraftSettings(teams=2, slots={'RB': 1, 'WR': 1})
+    my_roster = pd.DataFrame({
+        'position': ['WR'] * 3,
+        'first_name': ['My'] * 3,
+        'last_name': ['One', 'Two', 'Three'],
+        'team': ['M'] * 3,
+    }, index=['m1', 'm2', 'm3'])
+    opponent = pd.DataFrame({
+        'position': ['RB'] * 3,
+        'first_name': ['Opp'] * 3,
+        'last_name': ['One', 'Two', 'Three'],
+        'team': ['O'] * 3,
+    }, index=['o1', 'o2', 'o3'])
+    weekly_points = pd.DataFrame({1: {
+        'm1': 20.0, 'm2': 18.0, 'm3': float('nan'),
+        'o1': 20.0, 'o2': 18.0, 'o3': float('nan'),
+    }})
+
+    recs = compute_trade_recommendations(
+        my_roster, {'opp': {'name': 'Partner', 'roster': opponent}},
+        weekly_points, settings)
+
+    for give_size, receive_size in ((1, 1), (1, 2), (2, 1), (2, 2)):
+        offers = recs[recs.apply(
+            lambda row: (len(row['give_players']), len(row['receive_players'])) ==
+            (give_size, receive_size), axis=1)]
+        assert not offers.empty, (give_size, receive_size)
+        assert (offers['my_uplift'] > 0).all()
+        assert (offers['partner_uplift'] > 0).all()
+
+    assert not recs[['my_uplift', 'partner_uplift']].isna().any().any()
+
+
+def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeypatch):
+    from contextlib import nullcontext
+    import streamlit_app
+
+    markdown_calls, captions, metrics = [], [], []
+    monkeypatch.setattr(streamlit_app.st, 'markdown', markdown_calls.append)
+    monkeypatch.setattr(streamlit_app.st, 'caption', captions.append)
+    monkeypatch.setattr(streamlit_app.st, 'metric', lambda *args, **kwargs: metrics.append((args, kwargs)))
+    monkeypatch.setattr(streamlit_app.st, 'subheader', lambda _: None)
+    monkeypatch.setattr(streamlit_app.st, 'container', lambda **kwargs: nullcontext())
+    monkeypatch.setattr(streamlit_app.st, 'columns', lambda count: (nullcontext(),) * count)
+    player = lambda name, pid, position: {
+        'name': name, 'id': pid, 'position': position, 'team': 'BAL', 'p50': 12.0, 'p90': 18.0,
+    }
+    offers = pd.DataFrame([{
+        'partner_id': 'opp', 'partner_name': 'Partner',
+        'give_players': (player('My One', '1', 'WR'), player('My Two', '2', 'WR')),
+        'receive_players': (player('Juwan Johnson', '101', 'TE'),),
+        'my_uplift': 4.0, 'partner_uplift': 3.0,
+    }])
+
+    streamlit_app.render_trade_suggestions_table(offers)
+
+    assert markdown_calls.index('#### Partner') < markdown_calls.index('**You give**')
+    assert any('[Juwan Johnson](https://sleeper.com/nfl/players/juwan-johnson-101)' in text
+               for text in markdown_calls)
+    assert any('Uneven trade' in text for text in captions)
+    assert ('Your lineup gain', '+4.0 pts/wk') in [args for args, _ in metrics]
+    assert ('Their lineup gain', '+3.0 pts/wk') in [args for args, _ in metrics]
+
 
 def test_render_trade_suggestions_renders_multiple_leagues(monkeypatch):
     """render_trade_suggestions renders headers and fragments for each league."""

@@ -254,7 +254,7 @@ def test_render_waiver_pool_empty(monkeypatch):
 
     render_waiver_pool(pd.DataFrame())
 
-    assert info_calls == ["None"]
+    assert info_calls == ["No lineup-improving waiver moves this week."]
 
 
 def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatch):
@@ -304,8 +304,8 @@ def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatc
     assert any("Add Without Dropping" in m for m in markdown_calls)
 
     # Check player links rendered with Sleeper URLs
-    assert any("[Add One](https://sleeper.app/players/nfl/101)" in m for m in markdown_calls)
-    assert any("[Add Two](https://sleeper.app/players/nfl/102)" in m for m in markdown_calls)
+    assert any("[Add One](https://sleeper.com/nfl/players/add-one-101)" in m for m in markdown_calls)
+    assert any("[Add Two](https://sleeper.com/nfl/players/add-two-102)" in m for m in markdown_calls)
 
 
 def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):
