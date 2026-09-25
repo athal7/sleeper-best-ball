@@ -743,32 +743,45 @@ def build_my_roster(picks: list[dict], user_id: str, bye_weeks: dict[str, int]) 
 
 
 
-def _best_lineup_score(positions: pd.Series | list[str], scores: pd.Series | list[float],
-                       slots: list[str]) -> float:
-    if isinstance(positions, pd.Series):
-        position_values = positions.to_numpy()
-    else:
-        position_values = positions
-    if isinstance(scores, pd.Series):
-        aligned_scores = scores.reindex(positions.index if isinstance(positions, pd.Series) else range(len(scores))).fillna(0.0)
-        score_values = aligned_scores.to_numpy()
-    else:
-        score_values = scores
+# Starting slots have disjoint eligibility; FLEX, SUPER_FLEX, then BN only widen it.
+# Take the highest remaining projection for each slot without exploring player subsets.
+def _slot_priority(slot: str) -> int:
+    if slot in ('QB', 'RB', 'WR', 'TE', 'K', 'DEF'):
+        return 1
+    if slot in ('FLEX', 'FX'):
+        return 2
+    if slot in ('SUPER_FLEX', 'SFX'):
+        return 3
+    return 4
 
-    states = {0: 0.0}
-    for slot in slots:
-        slot_eligible = SLOT_ELIGIBILITY[slot]
-        next_states = {}
-        for mask, total in states.items():
-            for index, position in enumerate(position_values):
-                if mask & (1 << index) or position not in slot_eligible:
-                    continue
-                candidate = total + score_values[index]
-                next_mask = mask | (1 << index)
-                if candidate > next_states.get(next_mask, 0.0):
-                    next_states[next_mask] = candidate
-        states = next_states
-    return max(states.values(), default=0.0)
+
+def _best_lineup_score(positions: pd.Series | list[str],
+                       scores: pd.Series | list[float], slots: list[str]) -> float:
+    if isinstance(positions, pd.Series):
+        pos_vals = positions.to_numpy()
+    else:
+        pos_vals = np.asarray(positions)
+    if isinstance(scores, pd.Series):
+        index = positions.index if isinstance(positions, pd.Series) else range(len(pos_vals))
+        score_vals = scores.reindex(index).fillna(0.0).to_numpy()
+    else:
+        score_vals = np.asarray(scores, dtype=float)
+
+    order = np.argsort(-score_vals)
+    sorted_pos = pos_vals[order]
+    sorted_scores = score_vals[order]
+
+    ordered_slots = sorted(slots, key=_slot_priority)
+    total = 0.0
+    used = np.zeros(len(order), dtype=bool)
+    for slot in ordered_slots:
+        eligible = SLOT_ELIGIBILITY.get(slot, [slot])
+        for i in range(len(order)):
+            if not used[i] and sorted_pos[i] in eligible:
+                used[i] = True
+                total += sorted_scores[i]
+                break
+    return float(total)
 
 
 def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
@@ -1321,6 +1334,184 @@ def compute_waiver_add_drop_recommendations(
     return df
 
 
+def compute_trade_recommendations(
+    my_roster: pd.DataFrame,
+    opponent_rosters: dict[str, dict],
+    weekly_points: pd.DataFrame,
+    settings: DraftSettings,
+    projections: pd.DataFrame = None,
+    playoff_week_start: int | None = None,
+    current_week: int = 1,
+) -> pd.DataFrame:
+    """Compute 1-for-1 trade recommendations with all opponent managers in the league.
+
+    Evaluates rest-of-season starting lineup uplift for both the user's team (my_uplift)
+    and the trade partner's team (partner_uplift) when swapping a player D from my_roster
+    for a player A from the opponent's roster.
+    """
+    if my_roster.empty or not opponent_rosters:
+        return pd.DataFrame()
+
+    slots = [
+        slot
+        for slot, count in settings.slots.items()
+        for _ in range(count)
+    ]
+
+    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS and w >= current_week]
+    if not weeks:
+        return pd.DataFrame()
+
+    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
+    weights = {
+        w: (playoff_weight if playoff_week_start is not None and w >= playoff_week_start else 1.0)
+        for w in weeks
+    }
+    total_weight = sum(weights.values())
+
+    if projections is None:
+        projections = pd.DataFrame()
+
+    my_indices = my_roster.index.tolist()
+
+    my_baseline_scores = {}
+    my_base_minus_D = {}
+    my_without_slot_minus_D = {}
+
+    for w in weeks:
+        w_scores = weekly_points[w]
+        r_positions = my_roster['position']
+        r_scores = w_scores.reindex(my_indices).fillna(0.0)
+        my_baseline_scores[w] = _best_lineup_score(r_positions, r_scores, slots)
+
+        for d_id in my_indices:
+            r_sub = my_roster.drop(index=d_id)
+            sub_positions = r_sub['position']
+            sub_scores = w_scores.reindex(r_sub.index).fillna(0.0)
+            my_base_minus_D[(w, d_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
+            my_without_slot_minus_D[(w, d_id)] = [
+                _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
+                for i in range(len(slots))
+            ]
+
+    opp_baseline_scores = {}
+    opp_base_minus_A = {}
+    opp_without_slot_minus_A = {}
+
+    for opp_id, opp_data in opponent_rosters.items():
+        opp_roster = opp_data.get('roster')
+        if opp_roster is None or opp_roster.empty:
+            continue
+        opp_indices = opp_roster.index.tolist()
+        opp_positions = opp_roster['position']
+
+        for w in weeks:
+            w_scores = weekly_points[w]
+            o_scores = w_scores.reindex(opp_indices).fillna(0.0)
+            opp_baseline_scores[(opp_id, w)] = _best_lineup_score(opp_positions, o_scores, slots)
+
+            for a_id in opp_indices:
+                o_sub = opp_roster.drop(index=a_id)
+                sub_positions = o_sub['position']
+                sub_scores = w_scores.reindex(o_sub.index).fillna(0.0)
+                opp_base_minus_A[(opp_id, w, a_id)] = _best_lineup_score(sub_positions, sub_scores, slots)
+                opp_without_slot_minus_A[(opp_id, w, a_id)] = [
+                    _best_lineup_score(sub_positions, sub_scores, slots[:i] + slots[i + 1:])
+                    for i in range(len(slots))
+                ]
+
+    recs = []
+
+    for opp_id, opp_data in opponent_rosters.items():
+        opp_roster = opp_data.get('roster')
+        if opp_roster is None or opp_roster.empty:
+            continue
+        opp_name = opp_data.get('name') or opp_data.get('username') or str(opp_id)
+
+        for d_id in my_indices:
+            d_row = my_roster.loc[d_id]
+            pos_D = d_row['position']
+            eligible_indices_D = [i for i, s in enumerate(slots) if pos_D in SLOT_ELIGIBILITY[s]]
+
+            d_first = d_row.get('first_name', '')
+            d_last = d_row.get('last_name', '')
+            d_name = f"{d_first} {d_last}".strip() if (d_first or d_last) else str(d_id)
+            d_team = d_row.get('team', '')
+            d_p50 = float(d_row.get('p50_weekly', projections.loc[d_id, 'p50_weekly'] if d_id in projections.index else 0.0))
+            d_p90 = float(d_row.get('p90_weekly', projections.loc[d_id, 'p90_weekly'] if d_id in projections.index else 0.0))
+
+            for a_id in opp_roster.index:
+                a_row = opp_roster.loc[a_id]
+                pos_A = a_row['position']
+                eligible_indices_A = [i for i, s in enumerate(slots) if pos_A in SLOT_ELIGIBILITY[s]]
+
+                a_first = a_row.get('first_name', '')
+                a_last = a_row.get('last_name', '')
+                a_name = f"{a_first} {a_last}".strip() if (a_first or a_last) else str(a_id)
+                a_team = a_row.get('team', '')
+                a_p50 = float(a_row.get('p50_weekly', projections.loc[a_id, 'p50_weekly'] if a_id in projections.index else 0.0))
+                a_p90 = float(a_row.get('p90_weekly', projections.loc[a_id, 'p90_weekly'] if a_id in projections.index else 0.0))
+
+                my_weighted_sum = 0.0
+                opp_weighted_sum = 0.0
+
+                for w in weeks:
+                    score_A = float(weekly_points[w].get(a_id, 0.0)) if a_id in weekly_points[w].index else 0.0
+                    score_D = float(weekly_points[w].get(d_id, 0.0)) if d_id in weekly_points[w].index else 0.0
+
+                    # My Team receive A, give D
+                    my_base_sub = my_base_minus_D[(w, d_id)]
+                    if eligible_indices_A:
+                        my_w_slots = my_without_slot_minus_D[(w, d_id)]
+                        my_best_with_A = max(my_w_slots[i] + score_A for i in eligible_indices_A)
+                        my_new = max(my_base_sub, my_best_with_A)
+                    else:
+                        my_new = my_base_sub
+                    my_net = my_new - my_baseline_scores[w]
+                    my_weighted_sum += weights[w] * my_net
+
+                    # Opponent receive D, give A
+                    opp_base_sub = opp_base_minus_A[(opp_id, w, a_id)]
+                    if eligible_indices_D:
+                        opp_w_slots = opp_without_slot_minus_A[(opp_id, w, a_id)]
+                        opp_best_with_D = max(opp_w_slots[i] + score_D for i in eligible_indices_D)
+                        opp_new = max(opp_base_sub, opp_best_with_D)
+                    else:
+                        opp_new = opp_base_sub
+                    opp_net = opp_new - opp_baseline_scores[(opp_id, w)]
+                    opp_weighted_sum += weights[w] * opp_net
+
+                my_uplift = my_weighted_sum / total_weight
+                partner_uplift = opp_weighted_sum / total_weight
+
+                if my_uplift > 0 and partner_uplift > 0:
+                    recs.append({
+                        'partner_id': opp_id,
+                        'partner_name': opp_name,
+                        'give_player_id': d_id,
+                        'give_name': d_name,
+                        'give_position': pos_D,
+                        'give_team': d_team,
+                        'give_p50': d_p50,
+                        'give_p90': d_p90,
+                        'receive_player_id': a_id,
+                        'receive_name': a_name,
+                        'receive_position': pos_A,
+                        'receive_team': a_team,
+                        'receive_p50': a_p50,
+                        'receive_p90': a_p90,
+                        'my_uplift': my_uplift,
+                        'partner_uplift': partner_uplift,
+                        'total_uplift': my_uplift + partner_uplift,
+                    })
+
+    df = pd.DataFrame(recs)
+    if not df.empty:
+        df.sort_values(by=['my_uplift', 'partner_uplift'], ascending=[False, False], inplace=True)
+        df.reset_index(drop=True, inplace=True)
+    return df
+
+
 def render_waiver_pool(recommendations: pd.DataFrame):
     """Render waiver recommendations grouped by recommended drop player."""
     st.subheader("Waiver Recommendations")
@@ -1462,6 +1653,147 @@ def render_waiver_guide(username: str, week: int):
         st.markdown(f"(League ID: {league_id})")
 
 
+def render_trade_suggestions_table(recommendations: pd.DataFrame):
+    """Render trade recommendations as a sortable dataframe."""
+    st.subheader("Trade Suggestions")
+    if recommendations.empty:
+        st.info("No mutually beneficial trade suggestions found.")
+        return
+
+    partners = ["All Trade Partners"] + sorted(recommendations['partner_name'].unique().tolist())
+    selected_partner = st.selectbox("Filter by Trade Partner", partners, key=f"partner_{id(recommendations)}")
+
+    df = recommendations.copy()
+    if selected_partner != "All Trade Partners":
+        df = df[df['partner_name'] == selected_partner]
+
+    if df.empty:
+        st.info("No trade suggestions matching the selected filters.")
+        return
+
+    display = df[[
+        'partner_name',
+        'give_name', 'give_position', 'give_team', 'give_p50',
+        'receive_name', 'receive_position', 'receive_team', 'receive_p50',
+        'my_uplift', 'partner_uplift'
+    ]].copy()
+    display.columns = [
+        'Partner',
+        'Give Player', 'Give Pos', 'Give Team', 'Give P50',
+        'Receive Player', 'Receive Pos', 'Receive Team', 'Receive P50',
+        'Your Uplift', 'Partner Uplift'
+    ]
+    styled = display.style.format({
+        'Give P50': '{:.1f}', 'Receive P50': '{:.1f}',
+        'Your Uplift': '{:+.1f}', 'Partner Uplift': '{:+.1f}',
+    })
+    st.dataframe(styled, hide_index=True, height=600, column_order=display.columns.tolist())
+
+
+def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int, week: int):
+    try:
+        waiver_data = WaiverData(league_id=int(league_id), week=week)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Could not load league data: {exc}")
+        return
+
+    user_roster_id = waiver_data.get_user_roster_id(user_id)
+    if user_roster_id is None:
+        st.warning("You do not have a roster in this league.")
+        return
+
+    league = sleeper.League(int(league_id))
+    try:
+        settings = DraftSettings.from_draft(league.get_league())
+    except (KeyError, AttributeError):
+        settings = DraftSettings.from_actual_roster(waiver_data.rosters, user_roster_id)
+
+    scoring = fetch_draft_scoring(str(league_id))
+    bye_weeks = Data.get_bye_weeks(season)
+
+    projections = build_season_projections(season, scoring)
+    weekly_points, _ = build_projection_inputs(season, scoring)
+
+    rosters_info = Data.get_rosters(int(league_id))
+    user_players = waiver_data.rosters.loc[user_roster_id, 'players'] if 'players' in waiver_data.rosters.columns else []
+
+    my_roster = build_my_roster([], user_id, bye_weeks)
+    if user_players:
+        my_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(user_players).dropna(subset=['position'])
+        my_roster['bye_week'] = my_roster['team'].map(bye_weeks)
+
+    my_roster = my_roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
+    my_roster['p50_weekly'] = my_roster['p50_weekly'].fillna(0.0)
+    my_roster['p90_weekly'] = my_roster['p90_weekly'].fillna(0.0)
+
+    opponent_rosters = {}
+    for rid, row in waiver_data.rosters.iterrows():
+        if rid == user_roster_id:
+            continue
+        opp_players = row.get('players', [])
+        if not opp_players:
+            continue
+        opp_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(opp_players).dropna(subset=['position'])
+        opp_roster['bye_week'] = opp_roster['team'].map(bye_weeks)
+        opp_roster = opp_roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
+        opp_roster['p50_weekly'] = opp_roster['p50_weekly'].fillna(0.0)
+        opp_roster['p90_weekly'] = opp_roster['p90_weekly'].fillna(0.0)
+
+        partner_name = f"Team {rid}"
+        partner_username = ''
+        if rid in rosters_info.index:
+            r_info = rosters_info.loc[rid]
+            partner_name = r_info.get('name') or r_info.get('username') or partner_name
+            partner_username = r_info.get('username') or ''
+
+        opponent_rosters[rid] = {
+            'name': partner_name,
+            'username': partner_username,
+            'roster': opp_roster,
+        }
+
+    playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
+
+    recs = compute_trade_recommendations(
+        my_roster, opponent_rosters, weekly_points, settings,
+        projections=projections, playoff_week_start=playoff_week_start,
+        current_week=week)
+
+    st.caption(
+        f"Week {week} · Trade Analyzer · refreshes every {DRAFT_TTL}s")
+    st.caption(
+        f"Evaluating 1-for-1 trades with all managers in your league. "
+        f"'Win-Win' trades improve both teams' projected rest-of-season starting lineup scores.")
+    render_trade_suggestions_table(recs)
+
+
+def render_trade_suggestions(username: str, week: int):
+    st.title("Trade Suggestions \U0001f91d")
+    if not username:
+        st.info("Enter your Sleeper username in the sidebar to find your leagues.")
+        return
+
+    season = int(sleeper.get_sport_state('nfl')['league_season'])
+    try:
+        user_id, all_leagues = get_user_leagues(username, season)
+    except Exception as exc:  # noqa: BLE001
+        st.error(
+            f"Could not find Sleeper user '{username}'. "
+            f"Check the username, or retry if Sleeper is unavailable. ({exc})")
+        return
+
+    if not all_leagues:
+        st.info("No leagues found for this user this season.")
+        return
+
+    for l in all_leagues:
+        league_id = l['league_id']
+        name = l.get('name') or league_id
+        st.markdown(f"## {name}")
+        _trade_suggestions_league_fragment(league_id, user_id, season, week)
+        st.markdown(f"(League ID: {league_id})")
+
+
 def main():
     username = st.text_input(
         "Sleeper username", key='username_input',
@@ -1502,6 +1834,7 @@ def main():
         mode_options.append("Draft Assistant")
     if active_leagues and username:
         mode_options.append("Waiver Guide")
+        mode_options.append("Trade Suggestions")
 
     if not mode_options:
         st.session_state.pop('app_mode', None)
@@ -1539,6 +1872,9 @@ def main():
         return
     if mode == "Waiver Guide":
         render_waiver_guide(username, int(week_val))
+        return
+    if mode == "Trade Suggestions":
+        render_trade_suggestions(username, int(week_val))
         return
 
     context = Context(active_leagues)
