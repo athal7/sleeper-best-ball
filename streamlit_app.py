@@ -944,25 +944,7 @@ class Context:
     username: Optional[str]
     leagues: List[League]
 
-
-    @staticmethod
-    @st.cache_data(ttl=METADATA_TTL)
-    def _leagues(season: int, params: dict):
-        username = params.get('username')
-        locked_league_id = params.get('league')
-        leagues = []
-
-        if locked_league_id:
-            leagues = [locked_league_id]
-        elif username:
-            _, all_leagues = get_user_leagues(username, season)
-            leagues = [l['league_id']
-                       for l in all_leagues]
-            if not leagues:
-                st.warning("No leagues found for this user.")
-        return leagues
-
-    def __init__(self):
+    def __init__(self, league_ids: list[str]):
         current = get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
@@ -971,7 +953,7 @@ class Context:
         self.week = st.session_state.get(
             'week') or (display_week if is_regular_season and display_week > 0 else 1)
         self.leagues = []
-        for league_id in self._leagues(self.season, st.query_params.to_dict()):
+        for league_id in league_ids:
             data = Data(league_id=league_id, context=self)
             self.leagues.append(League(data=data))
 
@@ -1784,27 +1766,45 @@ def main():
         "Sleeper username", key='username_input',
         on_change=lambda: st.query_params.update({'username': st.session_state.username_input}),
         value=st.query_params.get('username'))
-    mode_options = ["Live Scores", "Draft Assistant", "Waiver Guide", "Trade Suggestions"]
-    remembered_mode = st.query_params.get('mode', mode_options[0])
-    mode_default = remembered_mode if remembered_mode in mode_options else mode_options[0]
-    mode = st.segmented_control(
-        "View", mode_options, default=mode_default, key="app_mode",
-        on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode or mode_options[0]}))
-    if not mode:
-        mode = mode_default
-    week_val = st.session_state.get('week', 1)
-    if mode == "Draft Assistant":
-        render_draft_assistant(username)
-        return
-    if mode == "Waiver Guide":
-        render_waiver_guide(username, int(week_val))
-        return
-    if mode == "Trade Suggestions":
-        render_trade_suggestions(username, int(week_val))
-        return
+    active_leagues = []
+    active_drafts = False
+    locked_league_id = st.query_params.get('league')
+    if username or locked_league_id:
+        season = int(get_sport_state('nfl')['league_season'])
+        if locked_league_id:
+            try:
+                league = Data.get_league(int(locked_league_id)).get_league()
+                if (league.get('status') == 'in_season'
+                        and str(league.get('season')) == str(season)):
+                    active_leagues = [locked_league_id]
+            except Exception as exc:  # noqa: BLE001 - surface Sleeper lookup failures
+                st.error(f"Could not load league '{locked_league_id}'. ({exc})")
+        elif username:
+            try:
+                _, leagues = get_user_leagues(username, season)
+                active_leagues = [league['league_id'] for league in leagues
+                                  if league.get('status') == 'in_season']
+            except Exception as exc:  # noqa: BLE001 - surface Sleeper lookup failures
+                st.error(f"Could not load leagues for Sleeper user '{username}'. ({exc})")
+        if username:
+            try:
+                _, drafts = get_user_drafts(username, season)
+                active_drafts = any(draft.get('status') == 'drafting'
+                                    for draft in drafts)
+            except Exception as exc:  # noqa: BLE001 - surface Sleeper lookup failures
+                st.error(f"Could not load drafts for Sleeper user '{username}'. ({exc})")
 
-    context = Context()
-    if not context.leagues:
+    mode_options = []
+    if active_leagues:
+        mode_options.append("Live Scores")
+    if active_drafts:
+        mode_options.append("Draft Assistant")
+    if active_leagues and username:
+        mode_options.append("Waiver Guide")
+        mode_options.append("Trade Suggestions")
+
+    if not mode_options:
+        st.session_state.pop('app_mode', None)
         st.html("""<style>
             html, body { background-color: #ffffff; }
             @media (prefers-color-scheme: dark) {
@@ -1818,6 +1818,33 @@ def main():
         </style>""")
         st.title("Sleeper Best Ball 🏈")
         st.markdown("*optimistic projections for best ball scoring*")
+        if not username and not locked_league_id:
+            st.info("Enter your Sleeper username to find active drafts and leagues.")
+        else:
+            st.info("No active drafts or leagues found this season.")
+        return
+
+    remembered_mode = st.query_params.get('mode', mode_options[0])
+    mode_default = remembered_mode if remembered_mode in mode_options else mode_options[0]
+    if st.session_state.get('app_mode') not in mode_options:
+        st.session_state.pop('app_mode', None)
+    mode = st.segmented_control(
+        "View", mode_options, default=mode_default, key="app_mode",
+        on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode or mode_options[0]}))
+    if mode not in mode_options:
+        mode = mode_default
+    week_val = st.session_state.get('week', 1)
+    if mode == "Draft Assistant":
+        render_draft_assistant(username)
+        return
+    if mode == "Waiver Guide":
+        render_waiver_guide(username, int(week_val))
+        return
+    if mode == "Trade Suggestions":
+        render_trade_suggestions(username, int(week_val))
+        return
+
+    context = Context(active_leagues)
 
     st.number_input("Week", min_value=1, max_value=18,
                     key='week', value=context.week)
