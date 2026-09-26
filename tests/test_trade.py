@@ -230,16 +230,13 @@ def test_compute_trade_recommendations_includes_mutually_beneficial_packages():
 
 
 def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeypatch):
-    from contextlib import nullcontext
     import streamlit_app
 
-    markdown_calls, captions, metrics = [], [], []
+    markdown_calls, captions, html_calls = [], [], []
     monkeypatch.setattr(streamlit_app.st, 'markdown', markdown_calls.append)
     monkeypatch.setattr(streamlit_app.st, 'caption', captions.append)
-    monkeypatch.setattr(streamlit_app.st, 'metric', lambda *args, **kwargs: metrics.append((args, kwargs)))
+    monkeypatch.setattr(streamlit_app.st, 'html', html_calls.append)
     monkeypatch.setattr(streamlit_app.st, 'subheader', lambda _: None)
-    monkeypatch.setattr(streamlit_app.st, 'container', lambda **kwargs: nullcontext())
-    monkeypatch.setattr(streamlit_app.st, 'columns', lambda count: (nullcontext(),) * count)
     player = lambda name, pid, position: {
         'name': name, 'id': pid, 'position': position, 'team': 'BAL', 'p50': 12.0, 'p90': 18.0,
     }
@@ -252,12 +249,18 @@ def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeyp
 
     streamlit_app.render_trade_suggestions_table(offers)
 
-    assert markdown_calls.index('#### Partner') < markdown_calls.index('**You give**')
-    assert any('[Juwan Johnson](https://sleeper.com/nfl/players/juwan-johnson-101)' in text
-               for text in markdown_calls)
+    assert any(m.startswith('#### Partner') for m in markdown_calls)
+    html = "\n".join(html_calls)
+    # Every package player is linked, on both sides of the offer
+    assert 'https://sleeper.com/nfl/players/my-one-1' in html
+    assert 'https://sleeper.com/nfl/players/my-two-2' in html
+    assert 'https://sleeper.com/nfl/players/juwan-johnson-101' in html
+    assert 'You give' in html and 'You receive' in html
+    assert "You gain +4.0 pts/wk" in html
+    assert "Their gain +3.0 pts/wk" in html
+    # Only one table per partner
+    assert len(html_calls) == 1
     assert any('Uneven trade' in text for text in captions)
-    assert ('Your lineup gain', '+4.0 pts/wk') in [args for args, _ in metrics]
-    assert ('Their lineup gain', '+3.0 pts/wk') in [args for args, _ in metrics]
 
 
 def test_render_trade_suggestions_renders_multiple_leagues(monkeypatch):

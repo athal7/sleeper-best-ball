@@ -1472,12 +1472,42 @@ def compute_trade_recommendations(
     return df
 
 
+def sleeper_player_url(name: str, player_id: str) -> str:
+    """Sleeper web profile URL for a player (not the JSON endpoint)."""
+    if not player_id:
+        return ''
+    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    return f"https://sleeper.com/nfl/players/{slug}-{quote(str(player_id), safe='')}"
+
+
 def sleeper_player_link(name: str, player_id: str) -> str:
     """Link to the Sleeper web profile, not the player JSON endpoint."""
     if not player_id:
         return f"**{name}**"
-    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
-    return f"[{name}](https://sleeper.com/nfl/players/{slug}-{quote(str(player_id), safe='')})"
+    return f"[{name}]({sleeper_player_url(name, player_id)})"
+
+
+def compact_styles() -> Style:
+    """Shared table styling for the compact recommendation views."""
+    return Style({
+        'table': {'width': '100%', 'max-width': '600px', 'table-layout': 'fixed',
+                  'font-size': '0.9em'},
+        'header': {'font-size': '0.6em', 'line-height': '1em', 'opacity': '0.6',
+                   'text-align': 'left', 'white-space': 'nowrap'},
+        'headnum': {'font-size': '0.6em', 'line-height': '1em', 'opacity': '0.6',
+                    'text-align': 'right', 'white-space': 'nowrap'},
+        'name': {'line-height': '1.2em', 'text-overflow': 'ellipsis',
+                 'overflow': 'hidden', 'white-space': 'nowrap'},
+        'link': {'color': 'inherit', 'text-decoration': 'none'},
+        'info': {'font-size': '0.8em', 'line-height': '0.9em', 'opacity': '0.8',
+                 'text-overflow': 'ellipsis', 'overflow': 'hidden', 'white-space': 'nowrap'},
+        'num': {'line-height': '1.2em', 'text-align': 'right'},
+        'gain': {'line-height': '1.2em', 'text-align': 'right', 'font-weight': 'bold'},
+        'label': {'text-align': 'center', 'vertical-align': 'middle', 'font-size': '0.6em',
+                  'opacity': '0.8'},
+        'status': {'font-size': '0.8em', 'font-style': 'italic', 'line-height': '1em',
+                   'opacity': '0.6'},
+    })
 
 
 def render_waiver_pool(recommendations: pd.DataFrame):
@@ -1502,39 +1532,45 @@ def render_waiver_pool(recommendations: pd.DataFrame):
             }
         drop_groups[drop_id]['adds'].append(row)
 
+    s = compact_styles()
     for drop_id, group in drop_groups.items():
         if drop_id and group['drop_name'] != 'None':
-            drop_pos_team = f" ({group['drop_position']} - {group['drop_team']})" if group['drop_position'] or group['drop_team'] else ""
-            drop_info = f"Drop **{group['drop_name']}**{drop_pos_team}"
+            pos_team = f"{group['drop_position']} - {group['drop_team']}".strip(' -')
+            drop_info = f"Drop **{group['drop_name']}**" + (f" ({pos_team})" if pos_team else "")
             if group['drop_p50'] > 0 or group['drop_p90'] > 0:
-                drop_stats = f"Current player · P50 {group['drop_p50']:.1f} pts · P90 {group['drop_p90']:.1f} pts"
-            else:
-                drop_stats = None
+                drop_info += f" · P50 {group['drop_p50']:.1f} · P90 {group['drop_p90']:.1f}"
         else:
             drop_info = "Add Without Dropping"
-            drop_stats = None
 
         st.markdown(f"#### {drop_info}")
-        if drop_stats:
-            st.caption(drop_stats)
-        for add_row in group['adds']:
-            add_id = add_row.get('add_player_id', '')
-            add_name = add_row.get('add_name', 'Unknown Player')
-            add_pos = add_row.get('add_position', '')
-            add_team = add_row.get('add_team', '')
-            add_p50 = add_row.get('add_p50', 0.0)
-            add_p90 = add_row.get('add_p90', 0.0)
-            uplift = add_row.get('uplift', 0.0)
+        doc, tag, text, line = Doc().ttl()
+        with tag('table', style=s.table):
+            with tag('tbody'):
+                with tag('tr'):
+                    line('th', 'Add', style=s.header)
+                    line('th', 'P50', style=s.headnum)
+                    line('th', 'P90', style=s.headnum)
+                    line('th', 'Gain', style=s.headnum)
+                for add_row in group['adds']:
+                    add_id = add_row.get('add_player_id', '')
+                    add_name = add_row.get('add_name', 'Unknown Player')
+                    add_pos = add_row.get('add_position', '')
+                    add_team = add_row.get('add_team', '')
+                    add_p50 = add_row.get('add_p50', 0.0)
+                    add_p90 = add_row.get('add_p90', 0.0)
+                    uplift = add_row.get('uplift', 0.0)
 
-            pos_team_str = f"({add_pos} - {add_team})" if add_pos or add_team else ""
-            player_link = sleeper_player_link(add_name, add_id)
-            with st.container(border=True):
-                col_player, col_uplift = st.columns([2, 1])
-                with col_player:
-                    st.markdown(f"**Add {player_link}** {pos_team_str}")
-                    st.caption(f"Weekly projection · P50 {add_p50:.1f} pts · P90 {add_p90:.1f} pts")
-                with col_uplift:
-                    st.metric(label="Gain · pts/wk", value=f"+{uplift:.2f}")
+                    with tag('tr'):
+                        with tag('td', style=s.name):
+                            with tag('a', href=sleeper_player_url(add_name, add_id), style=s.link):
+                                text(add_name)
+                        line('td', f"{add_p50:.1f}", style=s.num)
+                        line('td', f"{add_p90:.1f}", style=s.num)
+                        line('td', f"+{uplift:.2f}", style=s.gain)
+                    with tag('tr'):
+                        line('td', f"{add_pos} - {add_team}".strip(' -'),
+                             colspan=4, style=s.info)
+        st.html(doc.getvalue())
 
 
 @st.fragment
@@ -1631,30 +1667,44 @@ def render_trade_suggestions_table(recommendations: pd.DataFrame):
         st.info("No mutually beneficial trade suggestions found.")
         return
 
+    s = compact_styles()
+
+    def side_rows(tag, text, line, players):
+        """One row per player: name, then position/team and P50/P90 figures."""
+        for player in players:
+            with tag('tr'):
+                with tag('td', style=s.name):
+                    with tag('a', href=sleeper_player_url(player['name'], player['id']), style=s.link):
+                        text(player['name'])
+                line('td', f"{player['position']} {player['team']}", style=s.info)
+                line('td', f"{player['p50']:.1f}", style=s.num)
+                line('td', f"{player['p90']:.1f}", style=s.num)
+        line('tr', '')
+
     for _, offers in recommendations.groupby('partner_id', sort=False):
         partner = offers.iloc[0]['partner_name']
-        st.markdown(f"#### {partner}")
-        st.caption(f"Top {min(len(offers), 5)} of {len(offers)} mutually beneficial offers")
-        for _, offer in offers.head(5).iterrows():
-            with st.container(border=True):
-                give_col, receive_col = st.columns(2)
-                with give_col:
-                    st.markdown("**You give**")
-                    for player in offer['give_players']:
-                        st.markdown(f"{sleeper_player_link(player['name'], player['id'])} · {player['position']} {player['team']}")
-                        st.caption(f"P50 {player['p50']:.1f} · P90 {player['p90']:.1f} pts/wk")
-                with receive_col:
-                    st.markdown("**You receive**")
-                    for player in offer['receive_players']:
-                        st.markdown(f"{sleeper_player_link(player['name'], player['id'])} · {player['position']} {player['team']}")
-                        st.caption(f"P50 {player['p50']:.1f} · P90 {player['p90']:.1f} pts/wk")
-                your_gain, their_gain = st.columns(2)
-                with your_gain:
-                    st.metric("Your lineup gain", f"+{offer['my_uplift']:.1f} pts/wk")
-                with their_gain:
-                    st.metric("Their lineup gain", f"+{offer['partner_uplift']:.1f} pts/wk")
-                if len(offer['give_players']) != len(offer['receive_players']):
-                    st.caption("Uneven trade · the team receiving more players may need to free a roster spot.")
+        st.markdown(f"#### {partner} · top {min(len(offers), 5)} of {len(offers)}")
+
+        doc, tag, text, line = Doc().ttl()
+        with tag('table', style=s.table):
+            with tag('tbody'):
+                for _, offer in offers.head(5).iterrows():
+                    give_players, receive_players = offer['give_players'], offer['receive_players']
+                    with tag('tr'):
+                        line('th', 'You give', colspan=2, style=s.header)
+                        line('th', 'You receive', colspan=2, style=s.header)
+                    side_rows(tag, text, line, give_players)
+                    side_rows(tag, text, line, receive_players)
+                    with tag('tr'):
+                        line('td', f"You gain {offer['my_uplift']:+.1f} pts/wk",
+                             colspan=2, style=s.status)
+                        line('td', f"Their gain {offer['partner_uplift']:+.1f} pts/wk",
+                             colspan=2, style=s.status)
+                    line('tr', '')
+        st.html(doc.getvalue())
+        if any(len(o['give_players']) != len(o['receive_players'])
+               for _, o in offers.head(5).iterrows()):
+            st.caption("Uneven trade · the team receiving more players may need to free a roster spot.")
 
 
 def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int, week: int):

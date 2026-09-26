@@ -260,8 +260,9 @@ def test_render_waiver_pool_empty(monkeypatch):
 def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatch):
     import streamlit_app
 
-    markdown_calls = []
+    markdown_calls, html_calls = [], []
     monkeypatch.setattr(streamlit_app.st, 'markdown', lambda text: markdown_calls.append(text))
+    monkeypatch.setattr(streamlit_app.st, 'html', lambda markup: html_calls.append(markup))
     monkeypatch.setattr(streamlit_app.st, 'subheader', lambda msg: None)
 
     recs = pd.DataFrame([
@@ -303,9 +304,12 @@ def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatc
     assert any("Drop **Drop One**" in m for m in markdown_calls)
     assert any("Add Without Dropping" in m for m in markdown_calls)
 
-    # Check player links rendered with Sleeper URLs
-    assert any("[Add One](https://sleeper.com/nfl/players/add-one-101)" in m for m in markdown_calls)
-    assert any("[Add Two](https://sleeper.com/nfl/players/add-two-102)" in m for m in markdown_calls)
+    # Player links and projections render as compact HTML tables
+    html = "\n".join(html_calls)
+    assert 'https://sleeper.com/nfl/players/add-one-101' in html
+    assert 'https://sleeper.com/nfl/players/add-two-102' in html
+    assert "12.5" in html and "18.0" in html
+    assert "+7.50" in html
 
 
 def test_waiver_guide_caption_does_not_mention_auto_refresh(monkeypatch):
