@@ -1490,6 +1490,8 @@ def sleeper_player_link(name: str, player_id: str) -> str:
 ADD_COLOR = '#00c076'
 DROP_COLOR = '#ff4b4b'
 SUBTLE_DETAIL_STYLE = '<span style="font-size:0.75em;opacity:0.7;">%s</span>'
+# name/gain widths per side of a trade offer; each side totals 50%
+TRADE_COL_WIDTHS = ('42%', '8%', '42%', '8%')
 
 
 def icon_span(symbol: str, color: str) -> str:
@@ -1693,6 +1695,11 @@ def render_trade_suggestions_table(recommendations: pd.DataFrame):
 
         doc, tag, text, line = Doc().ttl()
         with tag('table', style=s.table):
+            # Each side is a wide name column plus a narrow gain column, so the
+            # name and the detail line beneath it span the same 50% of the table.
+            with tag('colgroup'):
+                for width in TRADE_COL_WIDTHS:
+                    doc.stag('col', style=f'width: {width}')
             with tag('tbody'):
                 for _, offer in offers.head(5).iterrows():
                     # Left column is your side of the deal, right is the partner's.
@@ -1713,8 +1720,9 @@ def render_trade_suggestions_table(recommendations: pd.DataFrame):
                                         with tag('a', href=sleeper_player_url(p['name'], p['id']),
                                                   style=s.link):
                                             text(p['name'])
-                                if i == 0:
-                                    raw_cell(doc, tag, gain, style=s.gain)
+                                # Always emit the gain cell: a short row would
+                                # shift later names into the narrow gain column.
+                                raw_cell(doc, tag, gain if i == 0 else '', style=s.gain)
                         with tag('tr'):
                             for players, _, _, _ in sides:
                                 with tag('td', colspan=2, style=s.info):

@@ -1,3 +1,5 @@
+import re
+
 import pandas as pd
 import pytest
 
@@ -266,6 +268,41 @@ def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeyp
     assert html.count('<span style="color:#00c076;">+</span>') == 1
     # Only one table per partner
     assert len(html_calls) == 1
+
+
+def test_render_trade_offer_rows_keep_every_cell(monkeypatch):
+    """Each player row must emit all four cells.
+
+    A short row lets the browser slide later names into the narrow gain
+    column, which truncates them to an ellipsis.
+    """
+    import streamlit_app
+
+    html_calls = []
+    monkeypatch.setattr(streamlit_app.st, 'markdown', lambda text, **kwargs: None)
+    monkeypatch.setattr(streamlit_app.st, 'html', html_calls.append)
+    player = lambda name, pid, position: {
+        'name': name, 'id': pid, 'position': position, 'team': 'BAL', 'p50': 12.0, 'p90': 18.0,
+    }
+    offers = pd.DataFrame([{
+        'partner_id': 'opp', 'partner_name': 'Partner',
+        'give_players': (player('My One', '1', 'WR'), player('My Two', '2', 'WR')),
+        'receive_players': (player('Their One', '101', 'TE'), player('Their Two', '102', 'RB')),
+        'my_uplift': 4.0, 'partner_uplift': 3.0,
+    }])
+
+    streamlit_app.render_trade_suggestions_table(offers)
+
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', "\n".join(html_calls), re.S)
+    assert rows
+    for row in rows:
+        cells = row.count('<td')
+        if not cells:
+            continue  # spacer row between offers
+        if 'colspan="2"' in row:
+            assert cells == 2, f'detail row should have 2 cells, got {cells}'
+        else:
+            assert cells == 4, f'player row should have 4 cells, got {cells}'
 
 
 def test_render_trade_suggestions_renders_multiple_leagues(monkeypatch):
