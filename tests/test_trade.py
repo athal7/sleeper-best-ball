@@ -235,7 +235,6 @@ def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeyp
     markdown_calls, html_calls = [], []
     monkeypatch.setattr(streamlit_app.st, 'markdown', markdown_calls.append)
     monkeypatch.setattr(streamlit_app.st, 'html', html_calls.append)
-    monkeypatch.setattr(streamlit_app.st, 'subheader', lambda _: None)
     player = lambda name, pid, position: {
         'name': name, 'id': pid, 'position': position, 'team': 'BAL', 'p50': 12.0, 'p90': 18.0,
     }
@@ -248,17 +247,23 @@ def test_render_trade_offers_groups_by_partner_and_links_package_players(monkeyp
 
     streamlit_app.render_trade_suggestions_table(offers)
 
-    assert any(m.startswith('#### Partner') for m in markdown_calls)
+    assert markdown_calls == ['#### Partner']
     html = "\n".join(html_calls)
     # Every package player is linked, on both sides of the offer
     assert 'https://sleeper.com/nfl/players/my-one-1' in html
     assert 'https://sleeper.com/nfl/players/my-two-2' in html
     assert 'https://sleeper.com/nfl/players/juwan-johnson-101' in html
-    # Condensed rows: position/projections under each side, gains on one line
-    assert 'WR BAL · P50 12.0 · P90 18.0 + WR BAL · P50 12.0 · P90 18.0' in html
-    assert 'TE BAL · P50 12.0 · P90 18.0' in html
-    assert "You gain +4.0 · their gain +3.0 pts/wk" in html
-    assert 'Uneven trade' in html
+    # Each player gets its own name row with a small detail line underneath
+    assert html.count('WR - BAL · P50 12.0 · P90 18.0') == 2
+    assert 'TE - BAL · P50 12.0 · P90 18.0' in html
+    # Gains are bare numbers beside each side, not a prose footer
+    assert '<span style="color:#00c076;">+4.0</span>' in html
+    assert '<span style="color:#00c076;">+3.0</span>' in html
+    assert 'You gain' not in html and 'pts/wk' not in html
+    # Uneven packages are conveyed by icons, not prose
+    assert 'Uneven trade' not in html
+    assert html.count('<span style="color:#ff4b4b;">−</span>') == 2
+    assert html.count('<span style="color:#00c076;">+</span>') == 1
     # Only one table per partner
     assert len(html_calls) == 1
 

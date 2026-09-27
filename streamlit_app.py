@@ -1487,6 +1487,31 @@ def sleeper_player_link(name: str, player_id: str) -> str:
     return f"[{name}]({sleeper_player_url(name, player_id)})"
 
 
+ADD_COLOR = '#00c076'
+DROP_COLOR = '#ff4b4b'
+SUBTLE_DETAIL_STYLE = '<span style="font-size:0.75em;opacity:0.7;">%s</span>'
+
+
+def icon_span(symbol: str, color: str) -> str:
+    """Colored add (+) / drop (\u2212) icon markup for the recommendation views."""
+    return f'<span style="color:{color};">{symbol}</span>'
+
+
+def player_detail_text(position: str, team: str, p50: float, p90: float) -> str:
+    """Small-font 'POS - TEAM \u00b7 P50 \u2026 \u00b7 P90 \u2026' line shown under a player name."""
+    return ' · '.join(filter(None, [
+        f"{position} - {team}".strip(' -'),
+        f"P50 {p50:.1f}" if p50 else '',
+        f"P90 {p90:.1f}" if p90 else '',
+    ]))
+
+
+def raw_cell(doc, tag, content: str, colspan: int = 1, style: str = ''):
+    """Emit a table cell holding raw HTML \u2014 yattag escapes text() and line()."""
+    with tag('td', colspan=colspan, style=style):
+        doc.asis(content)
+
+
 def compact_styles() -> Style:
     """Shared table styling for the compact recommendation views."""
     return Style({
@@ -1511,7 +1536,6 @@ def compact_styles() -> Style:
 
 def render_waiver_pool(recommendations: pd.DataFrame):
     """Render the best adds under the player each would replace."""
-    st.subheader("Recommended moves")
     if recommendations.empty:
         st.info("No lineup-improving waiver moves this week.")
         return
@@ -1534,14 +1558,19 @@ def render_waiver_pool(recommendations: pd.DataFrame):
     s = compact_styles()
     for drop_id, group in drop_groups.items():
         if drop_id and group['drop_name'] != 'None':
-            pos_team = f"{group['drop_position']} - {group['drop_team']}".strip(' -')
-            drop_info = f"Drop **{group['drop_name']}**" + (f" ({pos_team})" if pos_team else "")
+            heading = f"{icon_span('−', DROP_COLOR)} **{group['drop_name']}**"
+            parts = [f"{group['drop_position']} - {group['drop_team']}".strip(' -')]
             if group['drop_p50'] > 0 or group['drop_p90'] > 0:
-                drop_info += f" · P50 {group['drop_p50']:.1f} · P90 {group['drop_p90']:.1f}"
+                parts.append(f"P50 {group['drop_p50']:.1f}")
+                parts.append(f"P90 {group['drop_p90']:.1f}")
         else:
-            drop_info = "Add Without Dropping"
+            heading = f"{icon_span('+', ADD_COLOR)} Add Without Dropping"
+            parts = []
 
-        st.markdown(f"#### {drop_info}")
+        detail = SUBTLE_DETAIL_STYLE % " · ".join(p for p in parts if p)
+        st.markdown(
+            f"#### {heading}<br>{detail}" if detail else f"#### {heading}",
+            unsafe_allow_html=True)
         doc, tag, text, line = Doc().ttl()
         with tag('table', style=s.table):
             with tag('tbody'):
@@ -1558,12 +1587,11 @@ def render_waiver_pool(recommendations: pd.DataFrame):
                         with tag('td', style=s.name):
                             with tag('a', href=sleeper_player_url(add_name, add_id), style=s.link):
                                 text(add_name)
-                        line('td', f"+{uplift:.2f}", style=s.gain)
+                        raw_cell(doc, tag, icon_span(f'+{uplift:.2f}', ADD_COLOR),
+                                 style=s.gain)
                     with tag('tr'):
-                        pos_team = f"{add_pos} - {add_team}".strip(' -')
-                        detail = " · ".join(filter(None, [
-                            pos_team, f"P50 {add_p50:.1f}", f"P90 {add_p90:.1f}"]))
-                        line('td', detail, colspan=2, style=s.info)
+                        line('td', player_detail_text(add_pos, add_team, add_p50, add_p90),
+                             colspan=2, style=s.info)
                 line('tr', '')
         st.html(doc.getvalue())
 
@@ -1613,7 +1641,6 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
     my_roster['p50_weekly'] = my_roster['p50_weekly'].fillna(0.0)
     my_roster['p90_weekly'] = my_roster['p90_weekly'].fillna(0.0)
 
-    waiver_rank = waiver_data.get_user_waiver_rank(user_id)
     playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
 
     weekly_points, _ = build_projection_inputs(season, scoring)
@@ -1622,9 +1649,6 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
         projections=projections, playoff_week_start=playoff_week_start,
         current_week=week)
 
-    st.caption(f"Week {week} · Waiver rank #{waiver_rank} of {settings.teams}")
-    st.caption(
-        f"Showing recommendations that improve your team's projected lineup score.")
     render_waiver_pool(recs)
 
 
@@ -1657,52 +1681,47 @@ def render_waiver_guide(username: str, week: int):
 
 def render_trade_suggestions_table(recommendations: pd.DataFrame):
     """Show the strongest win-win offers under each trade partner."""
-    st.subheader("Trade ideas by partner")
     if recommendations.empty:
         st.info("No mutually beneficial trade suggestions found.")
         return
 
     s = compact_styles()
 
-    def name_links(tag, text, players):
-        """Linked player names for one side of an offer, joined for packages."""
-        for i, player in enumerate(players):
-            if i:
-                text(' + ')
-            with tag('a', href=sleeper_player_url(player['name'], player['id']), style=s.link):
-                text(player['name'])
-
-    def player_details(players):
-        return ' + '.join(
-            f"{p['position']} {p['team']} · P50 {p['p50']:.1f} · P90 {p['p90']:.1f}"
-            for p in players)
-
     for _, offers in recommendations.groupby('partner_id', sort=False):
         partner = offers.iloc[0]['partner_name']
-        st.markdown(f"#### {partner} · top {min(len(offers), 5)} of {len(offers)}")
+        st.markdown(f"#### {partner}")
 
         doc, tag, text, line = Doc().ttl()
         with tag('table', style=s.table):
             with tag('tbody'):
                 for _, offer in offers.head(5).iterrows():
-                    give_players, receive_players = offer['give_players'], offer['receive_players']
-                    with tag('tr'):
-                        with tag('td', colspan=2, style=s.name):
-                            name_links(tag, text, give_players)
-                        line('td', '→', style=s.label)
-                        with tag('td', colspan=2, style=s.name):
-                            name_links(tag, text, receive_players)
-                    with tag('tr'):
-                        line('td', player_details(give_players), colspan=2, style=s.info)
-                        line('td', '', style=s.info)
-                        line('td', player_details(receive_players), colspan=2, style=s.info)
-                    with tag('tr'):
-                        status = (f"You gain {offer['my_uplift']:+.1f} · "
-                                  f"their gain {offer['partner_uplift']:+.1f} pts/wk")
-                        if len(give_players) != len(receive_players):
-                            status += (" · Uneven trade · the team receiving more players "
-                                       "may need to free a roster spot.")
-                        line('td', status, colspan=5, style=s.status)
+                    # Left column is your side of the deal, right is the partner's.
+                    # Players you send out are marked -, players you take in +.
+                    sides = [
+                        (offer['give_players'], '−', DROP_COLOR,
+                         icon_span(f"{offer['my_uplift']:+.1f}", ADD_COLOR)),
+                        (offer['receive_players'], '+', ADD_COLOR,
+                         icon_span(f"{offer['partner_uplift']:+.1f}", ADD_COLOR)),
+                    ]
+                    for i in range(max(len(side[0]) for side in sides)):
+                        with tag('tr'):
+                            for players, symbol, color, gain in sides:
+                                with tag('td', style=s.name):
+                                    if i < len(players):
+                                        p = players[i]
+                                        doc.asis(icon_span(symbol, color) + ' ')
+                                        with tag('a', href=sleeper_player_url(p['name'], p['id']),
+                                                  style=s.link):
+                                            text(p['name'])
+                                if i == 0:
+                                    raw_cell(doc, tag, gain, style=s.gain)
+                        with tag('tr'):
+                            for players, _, _, _ in sides:
+                                with tag('td', colspan=2, style=s.info):
+                                    if i < len(players):
+                                        p = players[i]
+                                        text(player_detail_text(
+                                            p['position'], p['team'], p['p50'], p['p90']))
                     line('tr', '')
         st.html(doc.getvalue())
 
@@ -1776,11 +1795,6 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         projections=projections, playoff_week_start=playoff_week_start,
         current_week=week)
 
-    st.caption(f"Week {week} · Trade Analyzer")
-    st.caption(
-        "Win-win offers improve both teams' projected rest-of-season lineups. "
-        "Every 1-for-1 is evaluated; two-player packages use each team's "
-        "eight highest-projected candidates.")
     render_trade_suggestions_table(recs)
 
 
