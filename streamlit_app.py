@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import requests
 import re
+import time
 from dataclasses import InitVar, dataclass, field
 from itertools import combinations
 from typing import Optional, List
@@ -179,8 +180,12 @@ class Data:
             sleeper.Players().get_all_players("nfl"), orient='index')
 
     @staticmethod
-    @st.cache_data(ttl=METADATA_TTL)
     def get_projections(season: int, week: int) -> pd.DataFrame:
+        return Data._cached_projections(season, week, _projection_cache_hour())
+
+    @staticmethod
+    @st.cache_data(ttl=METADATA_TTL)
+    def _cached_projections(season: int, week: int, cache_hour: int) -> pd.DataFrame:
         return pd.DataFrame(sleeper.Stats().get_week_projections("regular", season, week))
 
     @staticmethod
@@ -640,6 +645,12 @@ class League:
         return grouped
 
 
+def _projection_cache_hour() -> int:
+    # Roll weekly and season keys together: separate TTLs could keep a nearly
+    # expired weekly response in the season snapshot for another full hour.
+    return int(time.time() // METADATA_TTL)
+
+
 SEASON_WEEKS = range(1, 19)  # NFL regular season: weeks 1-18
 Z_90TH_PERCENTILE = 1.2816   # standard-normal z-score for the 90th percentile
 
@@ -673,12 +684,24 @@ def _derive_bye_weeks(weekly_teams: dict[int, set[str]]) -> dict[str, int]:
     }
 
 
+def get_season_projection_stats(season: int) -> tuple[tuple[int, pd.DataFrame], ...]:
+    """Share raw weekly projections across users without stacking cache lifetimes."""
+    return _cached_season_projection_stats(season, _projection_cache_hour())
+
+
 @st.cache_data(ttl=METADATA_TTL)
+def _cached_season_projection_stats(season: int, cache_hour: int) -> tuple[tuple[int, pd.DataFrame], ...]:
+    # Season totals cannot supply weekly variance or remaining-week lineup scores.
+    return tuple(
+        (week, Data._cached_projections(season, week, cache_hour))
+        for week in SEASON_WEEKS
+    )
+
+
 def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, pd.Series]:
     weekly_points = {}
     weekly_adp = {}
-    for week in SEASON_WEEKS:
-        stats = Data.get_projections(season, week)
+    for week, stats in get_season_projection_stats(season):
         if stats.empty:
             continue
         compute = League._calc_points_from_stats(stats, scoring)
@@ -691,9 +714,7 @@ def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, p
     return pd.DataFrame(weekly_points), adp
 
 
-@st.cache_data(ttl=METADATA_TTL)
-def build_season_projections(season: int, scoring: dict) -> pd.DataFrame:
-    weekly, adp = build_projection_inputs(season, scoring)
+def build_season_projections(weekly: pd.DataFrame, adp: pd.Series) -> pd.DataFrame:
     p50_weekly = weekly.median(axis=1, skipna=True)
     p90_weekly = (weekly.mean(axis=1, skipna=True) +
                   Z_90TH_PERCENTILE * weekly.std(axis=1, skipna=True).fillna(0.0))
@@ -997,8 +1018,8 @@ def _draft_assistant_fragment(draft_id: str, user_id: str):
     settings = DraftSettings.from_draft(data.draft)
     scoring = fetch_draft_scoring(data.draft.get('league_id'))
     season = int(data.draft.get('season') or get_sport_state('nfl')['league_season'])
-    weekly_points, _ = build_projection_inputs(season, scoring)
-    projections = build_season_projections(season, scoring)
+    weekly_points, adp = build_projection_inputs(season, scoring)
+    projections = build_season_projections(weekly_points, adp)
     bye_weeks = Data.get_bye_weeks(season)
     pool = build_player_pool(projections, settings, data.picks, bye_weeks)
     next_pick_number = next_user_pick_number(
@@ -1621,7 +1642,8 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
     scoring = fetch_draft_scoring(str(league_id))
     bye_weeks = Data.get_bye_weeks(season)
 
-    projections = build_season_projections(season, scoring)
+    weekly_points, adp = build_projection_inputs(season, scoring)
+    projections = build_season_projections(weekly_points, adp)
     all_player_ids = set(Data.get_players().index)
     free_agent_ids = waiver_data.get_free_agent_player_ids(all_player_ids)
 
@@ -1645,7 +1667,6 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
 
     playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
 
-    weekly_points, _ = build_projection_inputs(season, scoring)
     recs = compute_waiver_add_drop_recommendations(
         waiver_pool, weekly_points, my_roster, settings,
         projections=projections, playoff_week_start=playoff_week_start,
@@ -1746,7 +1767,7 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         st.warning("You do not have a roster in this league.")
         return
 
-    league = sleeper.League(int(league_id))
+    league = Data.get_league(int(league_id))
     try:
         settings = DraftSettings.from_draft(league.get_league())
     except (KeyError, AttributeError):
@@ -1755,8 +1776,8 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
     scoring = fetch_draft_scoring(str(league_id))
     bye_weeks = Data.get_bye_weeks(season)
 
-    projections = build_season_projections(season, scoring)
-    weekly_points, _ = build_projection_inputs(season, scoring)
+    weekly_points, adp = build_projection_inputs(season, scoring)
+    projections = build_season_projections(weekly_points, adp)
 
     rosters_info = Data.get_rosters(int(league_id))
     user_players = waiver_data.rosters.loc[user_roster_id, 'players'] if 'players' in waiver_data.rosters.columns else []
