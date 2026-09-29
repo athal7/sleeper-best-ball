@@ -391,6 +391,46 @@ def test_compute_waiver_add_drop_recommendations_improves_team():
     assert recs.iloc[0]['drop_p90'] == 8.0
 
 
+def test_waiver_guide_prefers_cross_position_drop_when_it_improves_lineup(monkeypatch):
+    import streamlit_app
+
+    settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1, 'WR': 1})
+    waiver_pool = build_pool({
+        'fa_wr': {'position': 'WR', 'first_name': 'Free', 'last_name': 'Receiver',
+                  'team': 'FA', 'p50_weekly': 14.0, 'p90_weekly': 19.0},
+    })
+    my_roster = pd.DataFrame({
+        'position': ['QB', 'RB', 'RB', 'WR'],
+        'first_name': ['Starting', 'Starting', 'Bench', 'Current'],
+        'last_name': ['QB', 'RB', 'RB', 'WR'],
+        'team': ['QB', 'RB', 'RB', 'WR'],
+        'p50_weekly': [20.0, 10.0, 0.0, 13.5],
+        'p90_weekly': [25.0, 15.0, 3.0, 18.0],
+    }, index=['qb', 'rb', 'bench_rb', 'wr'])
+    weekly_points = pd.DataFrame({
+        1: {'qb': 20.0, 'rb': 10.0, 'bench_rb': 0.0, 'wr': 12.0, 'fa_wr': 18.0},
+        2: {'qb': 20.0, 'rb': 10.0, 'bench_rb': 0.0, 'wr': 15.0, 'fa_wr': 10.0},
+    })
+
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings)
+
+    assert len(recs) == 1
+    assert recs.iloc[0]['add_position'] == 'WR'
+    assert recs.iloc[0]['drop_player_id'] == 'bench_rb'
+    assert recs.iloc[0]['drop_position'] == 'RB'
+    assert recs.iloc[0]['uplift'] == pytest.approx(3.0)
+
+    headings, tables = [], []
+    monkeypatch.setattr(streamlit_app.st, 'markdown',
+                        lambda text, **kwargs: headings.append(text))
+    monkeypatch.setattr(streamlit_app.st, 'html', lambda markup: tables.append(markup))
+    render_waiver_pool(recs)
+    assert any('**Bench RB**' in heading and 'RB - RB' in heading for heading in headings)
+    assert any('Free Receiver' in table and 'WR - FA' in table and '+3.00' in table
+               for table in tables)
+
+
 def test_compute_waiver_add_drop_recommendations_filters_out_non_positive_uplift():
     """Should return empty DataFrame when free agent does not improve team (net uplift <= 0)."""
     settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1})
