@@ -146,6 +146,7 @@ def test_waiver_and_trade_fragments_share_raw_projections_and_use_league_scoring
     monkeypatch.setattr(app, 'render_trade_suggestions_table', trade_results.append)
     app.Data._cached_projections.clear()
     app._cached_season_projection_stats.clear()
+    app._cached_projection_inputs.clear()
     try:
         app._waiver_guide_league_fragment.__wrapped__('101', 'u1', 2031, 1)
         app._trade_suggestions_league_fragment('202', 'u1', 2031, 1)
@@ -161,5 +162,6 @@ def test_waiver_and_trade_fragments_share_raw_projections_and_use_league_scoring
         assert swap['my_uplift'] == 36.0
         assert swap['partner_uplift'] == 36.0
     finally:
+        app._cached_projection_inputs.clear()
         app._cached_season_projection_stats.clear()
         app.Data._cached_projections.clear()

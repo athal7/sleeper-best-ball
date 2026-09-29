@@ -684,9 +684,12 @@ def _derive_bye_weeks(weekly_teams: dict[int, set[str]]) -> dict[str, int]:
     }
 
 
-def get_season_projection_stats(season: int) -> tuple[tuple[int, pd.DataFrame], ...]:
-    """Share raw weekly projections across users without stacking cache lifetimes."""
-    return _cached_season_projection_stats(season, _projection_cache_hour())
+def get_season_projection_stats(
+        season: int, cache_hour: int | None = None) -> tuple[tuple[int, pd.DataFrame], ...]:
+    """Share raw weekly projections without stacking cache lifetimes."""
+    if cache_hour is None:
+        cache_hour = _projection_cache_hour()
+    return _cached_season_projection_stats(season, cache_hour)
 
 
 @st.cache_data(ttl=METADATA_TTL)
@@ -698,10 +701,13 @@ def _cached_season_projection_stats(season: int, cache_hour: int) -> tuple[tuple
     )
 
 
-def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, pd.Series]:
+@st.cache_data(ttl=METADATA_TTL)
+def _cached_projection_inputs(
+        season: int, scoring: dict, cache_hour: int
+) -> tuple[pd.DataFrame, pd.Series]:
     weekly_points = {}
     weekly_adp = {}
-    for week, stats in get_season_projection_stats(season):
+    for week, stats in get_season_projection_stats(season, cache_hour):
         if stats.empty:
             continue
         compute = League._calc_points_from_stats(stats, scoring)
@@ -712,6 +718,11 @@ def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, p
     adp = (pd.DataFrame(weekly_adp).bfill(axis=1).iloc[:, 0]
            if weekly_adp else pd.Series(dtype=float))
     return pd.DataFrame(weekly_points), adp
+
+
+def build_projection_inputs(season: int, scoring: dict) -> tuple[pd.DataFrame, pd.Series]:
+    """Cache league-scored weekly points until source projections refresh."""
+    return _cached_projection_inputs(season, scoring, _projection_cache_hour())
 
 
 def build_season_projections(weekly: pd.DataFrame, adp: pd.Series) -> pd.DataFrame:

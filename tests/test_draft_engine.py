@@ -281,8 +281,9 @@ def test_build_season_projections_excludes_bye_weeks_from_p90_estimate(monkeypat
         3: pd.DataFrame({'1': {'pass_yd': 250, 'adp_dd_ppr': 10}, '2': {'rec_yd': 50, 'adp_dd_ppr': 20}}),
     }
     monkeypatch.setattr(streamlit_app, 'get_season_projection_stats',
-                        lambda season: ((week, weekly_stats.get(week, pd.DataFrame()))
-                                        for week in streamlit_app.SEASON_WEEKS))
+                        lambda season, cache_hour=None: ((week, weekly_stats.get(week, pd.DataFrame()))
+                                                         for week in streamlit_app.SEASON_WEEKS))
+    streamlit_app._cached_projection_inputs.clear()
 
     scoring = {'pass_yd': 0.04, 'rec_yd': 0.1}
     weekly, adp = build_projection_inputs(season=2026, scoring=scoring)
@@ -304,20 +305,30 @@ def test_build_season_projections_skips_empty_weeks(monkeypatch):
 
     weekly_stats = {1: pd.DataFrame({'1': {'pass_yd': 100}})}
     monkeypatch.setattr(streamlit_app, 'get_season_projection_stats',
-                        lambda season: ((week, weekly_stats.get(week, pd.DataFrame()))
-                                        for week in streamlit_app.SEASON_WEEKS))
+                        lambda season, cache_hour=None: ((week, weekly_stats.get(week, pd.DataFrame()))
+                                                         for week in streamlit_app.SEASON_WEEKS))
+    streamlit_app._cached_projection_inputs.clear()
 
     weekly, adp = build_projection_inputs(season=2026, scoring={'pass_yd': 0.04})
     result = build_season_projections(weekly, adp)
     assert result.loc['1', 'p90_weekly'] == pytest.approx(4.0)
 
 
-def test_raw_season_cache_shares_live_fetches_and_rescores_each_request(monkeypatch):
+def test_raw_season_cache_shares_live_fetches_and_keys_scoring_by_hour(monkeypatch):
     import streamlit_app
 
     calls = []
+    score_calls = []
     pass_yards = [100]
     cache_hour = [1000]
+    original_compute = streamlit_app.League._calc_points_from_stats
+
+    def count_scoring(stats, scoring):
+        score_calls.append(tuple(sorted(scoring.items())))
+        return original_compute(stats, scoring)
+
+    monkeypatch.setattr(
+        streamlit_app.League, '_calc_points_from_stats', staticmethod(count_scoring))
 
     class FakeStats:
         def get_week_projections(self, phase, season, week):
@@ -328,6 +339,7 @@ def test_raw_season_cache_shares_live_fetches_and_rescores_each_request(monkeypa
 
     monkeypatch.setattr(streamlit_app.sleeper, 'Stats', FakeStats)
     monkeypatch.setattr(streamlit_app, '_projection_cache_hour', lambda: cache_hour[0])
+    streamlit_app._cached_projection_inputs.clear()
     streamlit_app.Data._cached_projections.clear()
     streamlit_app._cached_season_projection_stats.clear()
     try:
@@ -340,19 +352,22 @@ def test_raw_season_cache_shares_live_fetches_and_rescores_each_request(monkeypa
             assert projections.loc['1', 'p50_weekly'] == pytest.approx(expected)
             assert projections.loc['1', 'adp'] == pytest.approx(10.0)
         assert calls == [('regular', 2031, week) for week in streamlit_app.SEASON_WEEKS]
+        assert len(score_calls) == 2
 
         pass_yards[0] = 200
         weekly, _ = streamlit_app.build_projection_inputs(2031, {'pass_yd': 0.04})
         assert weekly.loc['1', 1] == pytest.approx(4.0)
+        assert len(score_calls) == 2
         cache_hour[0] += 1
         weekly, _ = streamlit_app.build_projection_inputs(2031, {'pass_yd': 0.04})
         assert weekly.loc['1', 1] == pytest.approx(8.0)
         assert streamlit_app.Data.get_projections(2031, 1).loc['pass_yd', '1'] == 200
         assert len(calls) == 2 * len(streamlit_app.SEASON_WEEKS)
+        assert len(score_calls) == 3
     finally:
+        streamlit_app._cached_projection_inputs.clear()
         streamlit_app._cached_season_projection_stats.clear()
         streamlit_app.Data._cached_projections.clear()
-
 
 class FakeLeagueForScoring:
     def __init__(self, league_id):
