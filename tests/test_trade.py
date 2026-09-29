@@ -61,8 +61,8 @@ def test_compute_trade_recommendations_win_win_trade():
     row = match.iloc[0]
     assert row['my_uplift'] == pytest.approx(18.0)
     assert row['partner_uplift'] == pytest.approx(18.0)
-    assert (recs['my_uplift'] > 0).all()
-    assert (recs['partner_uplift'] > 0).all()
+    assert (recs['my_uplift'] > 1).all()
+    assert (recs['partner_uplift'] > 1).all()
 
 
 def test_compute_trade_recommendations_excludes_one_sided_trade():
@@ -189,6 +189,44 @@ def test_compute_trade_recommendations_rest_of_season():
     assert match.iloc[0]['my_uplift'] == pytest.approx(10.0)
 
 
+@pytest.mark.parametrize(('give_score', 'receive_score', 'suggested'), [
+    (1.0, 5.0, False),
+    (5.0, 1.0, False),
+    (0.5, 5.0, False),
+    (5.0, 0.5, False),
+    (1.01, 1.01, True),
+])
+def test_trade_requires_more_than_one_weekly_point_for_each_team(
+        give_score, receive_score, suggested):
+    settings = DraftSettings(teams=2, slots={'RB': 1, 'WR': 1})
+    my_roster = pd.DataFrame({
+        'position': ['WR', 'WR'],
+        'first_name': ['My', 'My'],
+        'last_name': ['Starter', 'Extra'],
+    }, index=['my_starter', 'my_extra'])
+    opponent = pd.DataFrame({
+        'position': ['RB', 'RB'],
+        'first_name': ['Their', 'Their'],
+        'last_name': ['Starter', 'Extra'],
+    }, index=['their_starter', 'their_extra'])
+    scores = {
+        'my_starter': 20.0, 'my_extra': give_score,
+        'their_starter': 20.0, 'their_extra': receive_score,
+    }
+    # The threshold applies to the weighted per-week average, not the season sum.
+    weekly_points = pd.DataFrame({1: scores, 2: scores})
+    recs = compute_trade_recommendations(
+        my_roster, {'opp': {'name': 'Partner', 'roster': opponent}},
+        weekly_points, settings, playoff_week_start=2)
+
+    offers = recs[(recs['give_player_id'] == 'my_extra') &
+                  (recs['receive_player_id'] == 'their_extra')] if not recs.empty else recs
+    assert (not offers.empty) == suggested
+    if suggested:
+        assert offers.iloc[0]['my_uplift'] == pytest.approx(receive_score)
+        assert offers.iloc[0]['partner_uplift'] == pytest.approx(give_score)
+
+
 def test_compute_trade_recommendations_empty_inputs():
     """Handles empty rosters or missing opponent data gracefully."""
     settings = DraftSettings(teams=12, slots={'RB': 1, 'WR': 1})
@@ -225,8 +263,8 @@ def test_compute_trade_recommendations_includes_mutually_beneficial_packages():
             lambda row: (len(row['give_players']), len(row['receive_players'])) ==
             (give_size, receive_size), axis=1)]
         assert not offers.empty, (give_size, receive_size)
-        assert (offers['my_uplift'] > 0).all()
-        assert (offers['partner_uplift'] > 0).all()
+        assert (offers['my_uplift'] > 1).all()
+        assert (offers['partner_uplift'] > 1).all()
 
     assert not recs[['my_uplift', 'partner_uplift']].isna().any().any()
 

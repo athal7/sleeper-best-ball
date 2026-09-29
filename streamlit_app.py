@@ -1367,7 +1367,7 @@ def compute_trade_recommendations(
     playoff_week_start: int | None = None,
     current_week: int = 1,
 ) -> pd.DataFrame:
-    """Find win-win swaps of one or two players per team across remaining weeks.
+    """Find swaps improving both teams by >1 weighted point per week.
 
     Every single-player swap is scored. Package searches use the eight highest
     projected players on each roster to bound the pairwise combinations.
@@ -1456,7 +1456,7 @@ def compute_trade_recommendations(
                                                      np.concatenate((opp_remaining, given_scores)), slots)
                     my_sum += weight * (new_my - my_baseline[i])
                     partner_sum += weight * (new_partner - opp_baseline[i])
-                if my_sum <= 0 or partner_sum <= 0:
+                if my_sum <= total_weight or partner_sum <= total_weight:
                     continue
 
                 my_uplift = my_sum / total_weight
@@ -1705,7 +1705,7 @@ def render_waiver_guide(username: str, week: int):
 def render_trade_suggestions_table(recommendations: pd.DataFrame):
     """Show the strongest win-win offers under each trade partner."""
     if recommendations.empty:
-        st.info("No mutually beneficial trade suggestions found.")
+        st.info("No trades improve both teams by more than 1 point per week.")
         return
 
     s = compact_styles()
