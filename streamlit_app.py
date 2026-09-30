@@ -1203,12 +1203,12 @@ def compute_waiver_add_drop_recommendations(
     playoff_week_start: int | None = None,
     current_week: int = 1,
 ) -> pd.DataFrame:
-    """Compute add/drop recommendations that strictly improve the team (uplift > 0).
+    """Compute add/drop recommendations gaining >1 weighted point per week.
 
     For each free agent candidate A in waiver_pool and each roster player D in my_roster,
     computes the net team lineup score uplift across rest of season weeks (>= current_week)
     when dropping D and adding A. Identifies the drop player D that maximizes net uplift
-    for candidate A, and filters out any recommendations with net uplift <= 0.
+    for candidate A, and filters out recommendations with net uplift <= 1.
     """
     if waiver_pool.empty:
         return pd.DataFrame()
@@ -1311,7 +1311,7 @@ def compute_waiver_add_drop_recommendations(
                     best_uplift = avg_uplift
                     best_d_id = d_id
 
-            if best_uplift > 0 and best_d_id is not None:
+            if best_uplift > 1 and best_d_id is not None:
                 d_row = my_roster.loc[best_d_id]
                 d_first = d_row.get('first_name', '')
                 d_last = d_row.get('last_name', '')
@@ -1345,7 +1345,7 @@ def compute_waiver_add_drop_recommendations(
                 weighted_uplift_sum += weights[w] * new_score
 
             avg_uplift = weighted_uplift_sum / total_weight
-            if avg_uplift > 0:
+            if avg_uplift > 1:
                 recs.append({
                     'add_player_id': a_id,
                     'add_name': a_name,
@@ -1571,7 +1571,7 @@ def compact_styles() -> Style:
 def render_waiver_pool(recommendations: pd.DataFrame):
     """Render the best adds under the player each would replace."""
     if recommendations.empty:
-        st.info("No lineup-improving waiver moves this week.")
+        st.info("No waiver moves improve your lineup by more than 1 point per week.")
         return
 
     recs = recommendations.sort_values(by='uplift', ascending=False) if 'uplift' in recommendations.columns else recommendations

@@ -253,7 +253,7 @@ def test_render_waiver_pool_empty(monkeypatch):
 
     render_waiver_pool(pd.DataFrame())
 
-    assert info_calls == ["No lineup-improving waiver moves this week."]
+    assert info_calls == ["No waiver moves improve your lineup by more than 1 point per week."]
 
 
 def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatch):
@@ -359,7 +359,7 @@ def test_waiver_guide_shows_no_header_or_caption_text(monkeypatch):
 # --- compute_waiver_add_drop_recommendations ---
 
 def test_compute_waiver_add_drop_recommendations_improves_team():
-    """Should recommend adding a higher-scoring player and dropping the weakest roster player if net uplift > 0."""
+    """Should recommend a replacement that gains more than 1 point per week."""
     settings = DraftSettings(teams=12, slots={'QB': 1, 'RB': 1})
     waiver_pool = build_pool({
         'fa1': {'position': 'RB', 'first_name': 'Free', 'last_name': 'Agent', 'team': 'FA', 'p50_weekly': 15.0, 'p90_weekly': 20.0},
@@ -454,6 +454,29 @@ def test_compute_waiver_add_drop_recommendations_filters_out_non_positive_uplift
         waiver_pool, weekly_points, my_roster, settings)
 
     assert recs.empty
+
+
+@pytest.mark.parametrize('has_roster', [False, True])
+def test_compute_waiver_add_drop_recommendations_requires_more_than_one_weekly_point(has_roster):
+    settings = DraftSettings(teams=12, slots={'RB': 1})
+    waiver_pool = build_pool({
+        candidate: {'position': 'RB'}
+        for candidate in ('small', 'boundary', 'qualifying')
+    })
+    my_roster = (pd.DataFrame({'position': ['RB']}, index=['current'])
+                 if has_roster else pd.DataFrame())
+    weekly_points = pd.DataFrame({
+        week: {'current': 10.0, 'small': 10.5 if has_roster else 0.5,
+               'boundary': 11.0 if has_roster else 1.0,
+               'qualifying': 11.5 if has_roster else 1.5}
+        for week in (1, 2)
+    })
+
+    recs = compute_waiver_add_drop_recommendations(
+        waiver_pool, weekly_points, my_roster, settings)
+
+    assert recs['add_player_id'].tolist() == ['qualifying']
+    assert recs.iloc[0]['uplift'] == pytest.approx(1.5)
 
 
 def test_compute_waiver_add_drop_recommendations_rest_of_season():
