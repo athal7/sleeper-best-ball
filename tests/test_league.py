@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import pandas as pd
 import tests.mock
 from streamlit_app import League
@@ -58,3 +59,36 @@ def test_points_calculations():
     assert p5['points'] == 0
     assert p5['projection'] == 0
     assert p5['optimistic'] == 0
+
+
+def test_rostered_player_without_team_remains_in_matchup():
+    data = tests.mock.data()
+    data.players = pd.DataFrame.from_dict({
+        'rostered': tests.mock.player(first_name='Taylor', last_name='Hill',
+                                      team=None, position='WR'),
+        'unrostered': tests.mock.player(team=None, position='WR'),
+        'opponent': tests.mock.player(team='A', position='QB'),
+    }, orient='index')
+    data.rosters = pd.DataFrame([
+        {'name': 'One', 'username': 'one', 'avatar': '', 'record': '0-0', 'rank': 1},
+        {'name': 'Two', 'username': 'two', 'avatar': '', 'record': '0-0', 'rank': 2},
+    ], index=[1, 2])
+    data.matchups = pd.DataFrame([
+        {'roster_id': 1, 'matchup_id': 1, 'players': ['rostered']},
+        {'roster_id': 2, 'matchup_id': 1, 'players': ['opponent']},
+    ])
+    data.game_statuses = pd.DataFrame.from_dict({
+        'A': tests.mock.game_status(),
+    }, orient='index')
+    data.stats = pd.DataFrame({'rostered': {'rec': 3}})
+    data.projections = pd.DataFrame({'rostered': {'rec': 4}})
+    data.league.get_league.return_value = {
+        'scoring_settings': {'rec': 1}, 'roster_positions': ['WR', 'QB'],
+    }
+
+    league = League(data=data)
+    assert 'unrostered' not in league.players().index
+    matchup, = league.matchups(SimpleNamespace(username=None))
+    assert matchup.team1.roster.at_position('WR1').name == 'T. Hill'
+    assert matchup.team1.points == '3.00'
+    assert matchup.team1.projection == '7.00'

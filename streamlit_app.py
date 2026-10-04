@@ -455,7 +455,7 @@ class FantasyTeam:
     roster: Roster = field(init=False)
 
     def __post_init__(self, players: pd.Series, all_players: pd.DataFrame, positions: Positions):
-        self.roster = Roster(all_players.loc[players], positions)
+        self.roster = Roster(all_players.reindex(players).dropna(subset=['position']), positions)
 
     @property
     def avatar_url(self) -> str:
@@ -603,7 +603,13 @@ class League:
     def players(self) -> pd.DataFrame:
         df = self.data.players.copy(
         )[['team', 'first_name', 'last_name', 'position', 'injury_status']]
-        df = df[df['team'].notna()]
+        # Weekly matchups carry player IDs; get_rosters() keeps team metadata only.
+        rostered = (
+            {player_id for roster in self.data.matchups['players'].dropna()
+             for player_id in roster}
+            if 'players' in self.data.matchups else set()
+        )
+        df = df[df['team'].notna() | df.index.isin(rostered)]
         df = df.join(self.data.game_statuses, on='team', how='left')
         df['pct_played'] = (df['quarter'] * 15 - df['clock'] / 60) / 60
         df['pct_played'] = df['pct_played'].clip(0, 1)
