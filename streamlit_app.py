@@ -1614,7 +1614,7 @@ def render_waiver_pool(recommendations: pd.DataFrame):
         doc, tag, text, line = Doc().ttl()
         with tag('table', style=s.table):
             with tag('tbody'):
-                for add_row in group['adds']:
+                for add_row in group['adds'][:5]:
                     add_id = add_row.get('add_player_id', '')
                     add_name = add_row.get('add_name', 'Unknown Player')
                     add_pos = add_row.get('add_position', '')

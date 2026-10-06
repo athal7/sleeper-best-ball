@@ -314,6 +314,29 @@ def test_render_waiver_pool_renders_grouped_recommendations_and_links(monkeypatc
     assert '<span style="color:#00c076;">+7.50</span>' in html
 
 
+def test_render_waiver_pool_limits_ranked_adds_per_drop(monkeypatch):
+    import streamlit_app
+
+    tables = []
+    monkeypatch.setattr(streamlit_app.st, 'markdown', lambda *args, **kwargs: None)
+    monkeypatch.setattr(streamlit_app.st, 'html', tables.append)
+    recs = pd.DataFrame([
+        {'drop_player_id': drop, 'drop_name': drop,
+         'add_player_id': f'{drop}-{rank}', 'add_name': f'{drop} Add {rank}',
+         'uplift': float(rank)}
+        for drop, count in [('Drop A', 7), ('Drop B', 2)]
+        for rank in range(count)
+    ])
+
+    render_waiver_pool(recs)
+
+    assert len(tables) == 2
+    assert [f'Drop A Add {rank}</a>' in tables[0] for rank in range(7)] == [
+        False, False, True, True, True, True, True]
+    assert [f'Drop B Add {rank}</a>' in tables[1] for rank in range(2)] == [True, True]
+    assert [tables[0].index(f'Drop A Add {rank}</a>') for rank in range(6, 1, -1)] == sorted(
+        tables[0].index(f'Drop A Add {rank}</a>') for rank in range(6, 1, -1))
+
 def test_waiver_guide_shows_no_header_or_caption_text(monkeypatch):
     import streamlit_app
 
