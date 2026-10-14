@@ -178,10 +178,11 @@ def test_compute_trade_recommendations_rest_of_season():
     weekly_points = pd.DataFrame({
         1: {'wr1_my': 100.0, 'wr2_my': 100.0, 'rb1_opp': 100.0, 'rb2_opp': 100.0},
         2: {'wr1_my': 20.0, 'wr2_my': 10.0, 'rb1_opp': 20.0, 'rb2_opp': 10.0},
+        3: {'wr1_my': 20.0, 'wr2_my': 100.0, 'rb1_opp': 20.0, 'rb2_opp': 10.0},
     })
 
     recs = compute_trade_recommendations(
-        my_roster, opponent_rosters, weekly_points, settings, current_week=2)
+        my_roster, opponent_rosters, weekly_points, settings, current_week=2, end_week=2)
 
     assert not recs.empty
     match = recs[(recs['give_player_id'] == 'wr2_my') & (recs['receive_player_id'] == 'rb2_opp')]

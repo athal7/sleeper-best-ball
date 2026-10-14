@@ -1200,6 +1200,20 @@ def compute_waiver_value(pool: pd.DataFrame, lineup_uplift: pd.Series,
     )
 
 
+def fantasy_season_end_week(league_settings: dict) -> int:
+    """Include the championship, accounting for byes and multiweek rounds."""
+    start = league_settings.get('playoff_week_start')
+    teams = league_settings.get('playoff_teams')
+    if start == 0:
+        return 18
+    if start is None or teams is None or teams < 2:
+        return 18
+    rounds = (teams - 1).bit_length()
+    round_type = league_settings.get('playoff_round_type', 0)
+    duration = rounds * 2 if round_type == 2 else rounds + (round_type == 1)
+    return min(18, start + duration - 1)
+
+
 def compute_waiver_add_drop_recommendations(
     waiver_pool: pd.DataFrame,
     weekly_points: pd.DataFrame,
@@ -1208,13 +1222,12 @@ def compute_waiver_add_drop_recommendations(
     projections: pd.DataFrame = None,
     playoff_week_start: int | None = None,
     current_week: int = 1,
+    end_week: int = 18,
 ) -> pd.DataFrame:
-    """Compute add/drop recommendations gaining >1 weighted point per week.
+    """Compute add/drop recommendations from current_week through end_week.
 
-    For each free agent candidate A in waiver_pool and each roster player D in my_roster,
-    computes the net team lineup score uplift across rest of season weeks (>= current_week)
-    when dropping D and adding A. Identifies the drop player D that maximizes net uplift
-    for candidate A, and filters out recommendations with net uplift <= 1.
+    For each free agent and roster player, compute net lineup uplift when
+    adding the free agent and dropping that roster player. Filter out uplift <= 1.
     """
     if waiver_pool.empty:
         return pd.DataFrame()
@@ -1225,7 +1238,10 @@ def compute_waiver_add_drop_recommendations(
         for _ in range(count)
     ]
 
-    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS and w >= current_week]
+    weeks = [
+        w for w in weekly_points.columns
+        if w in SEASON_WEEKS and current_week <= w <= end_week
+    ]
     if not weeks:
         return pd.DataFrame()
 
@@ -1383,8 +1399,11 @@ def compute_trade_recommendations(
     projections: pd.DataFrame = None,
     playoff_week_start: int | None = None,
     current_week: int = 1,
+    end_week: int = 18,
 ) -> pd.DataFrame:
     """Find swaps improving both teams by >1 weighted point per week.
+
+    Scores weeks from current_week through end_week, inclusive.
 
     Every single-player swap is scored. Package searches use the eight highest
     projected players on each roster to bound the pairwise combinations.
@@ -1393,7 +1412,10 @@ def compute_trade_recommendations(
         return pd.DataFrame()
 
     slots = [slot for slot, count in settings.slots.items() for _ in range(count)]
-    weeks = [w for w in weekly_points.columns if w in SEASON_WEEKS and w >= current_week]
+    weeks = [
+        w for w in weekly_points.columns
+        if w in SEASON_WEEKS and current_week <= w <= end_week
+    ]
     if not weeks:
         return pd.DataFrame()
 
@@ -1687,7 +1709,7 @@ def _waiver_guide_league_fragment(league_id: str, user_id: str, season: int, wee
     recs = compute_waiver_add_drop_recommendations(
         waiver_pool, weekly_points, my_roster, settings,
         projections=projections, playoff_week_start=playoff_week_start,
-        current_week=week)
+        current_week=week, end_week=fantasy_season_end_week(waiver_data.waiver_settings))
 
     render_waiver_pool(recs)
 
@@ -1839,7 +1861,7 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
     recs = compute_trade_recommendations(
         my_roster, opponent_rosters, weekly_points, settings,
         projections=projections, playoff_week_start=playoff_week_start,
-        current_week=week)
+        current_week=week, end_week=fantasy_season_end_week(waiver_data.waiver_settings))
 
     render_trade_suggestions_table(recs)
 

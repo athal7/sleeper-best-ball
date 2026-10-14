@@ -9,6 +9,7 @@ from streamlit_app import (
     DraftSettings,
     compute_upside_bonus,
     UPSIDE_WEIGHT,
+    fantasy_season_end_week,
 )
 
 
@@ -18,6 +19,16 @@ def build_pool(rows: dict) -> pd.DataFrame:
 
 def build_rosters(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize(('settings', 'end_week'), [
+    ({'playoff_week_start': 15, 'playoff_teams': 4, 'playoff_round_type': 0}, 16),
+    ({'playoff_week_start': 15, 'playoff_teams': 6, 'playoff_round_type': 0}, 17),
+    ({'playoff_week_start': 15, 'playoff_teams': 6, 'playoff_round_type': 1}, 18),
+    ({'playoff_week_start': 15, 'playoff_teams': 4, 'playoff_round_type': 2}, 18),
+])
+def test_fantasy_season_end_week_includes_championship(settings, end_week):
+    assert fantasy_season_end_week(settings) == end_week
 
 
 # --- WaiverData ---
@@ -522,13 +533,14 @@ def test_compute_waiver_add_drop_recommendations_rest_of_season():
     weekly_points = pd.DataFrame({
         1: {'fa1': 100.0, 'qb1': 20.0, 'rb_weak': 5.0},
         2: {'fa1': 10.0, 'qb1': 20.0, 'rb_weak': 5.0},
+        3: {'fa1': 100.0, 'qb1': 20.0, 'rb_weak': 5.0},
     })
 
     recs = compute_waiver_add_drop_recommendations(
-        waiver_pool, weekly_points, my_roster, settings, current_week=2)
+        waiver_pool, weekly_points, my_roster, settings, current_week=2, end_week=2)
 
     assert not recs.empty
-    # Rest-of-season uplift starting at week 2 should equal week 2 uplift (5.0), not average of week 1 and 2 (52.5)
+    # Ignore both the past week and the week after this league's championship.
     assert recs.iloc[0]['uplift'] == pytest.approx(5.0)
 
 
