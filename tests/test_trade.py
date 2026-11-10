@@ -5,6 +5,7 @@ import pytest
 
 from streamlit_app import (
     compute_trade_recommendations,
+    compute_trade_suggestions,
     DraftSettings,
     render_trade_suggestions,
 )
@@ -373,3 +374,78 @@ def test_render_trade_suggestions_renders_multiple_leagues(monkeypatch):
     assert rendered_fragments == [('l1', 'user_1', 1), ('l2', 'user_1', 1)]
     assert '## League One' in markdown_calls
     assert '## League Two' in markdown_calls
+
+
+def _analyzer_rosters():
+    my_roster = pd.DataFrame({
+        'position': ['WR', 'WR', 'RB'],
+        'first_name': ['My', 'My', 'My'],
+        'last_name': ['Starter', 'Extra', 'Back'],
+    }, index=['my_wr1', 'my_wr2', 'my_rb'])
+    partner = pd.DataFrame({
+        'position': ['RB', 'RB', 'WR'],
+        'first_name': ['Their', 'Their', 'Their'],
+        'last_name': ['Starter', 'Extra', 'Wide'],
+    }, index=['their_rb1', 'their_rb2', 'their_wr'])
+    scores = {
+        'my_wr1': 20.0, 'my_wr2': 10.0, 'my_rb': 5.0,
+        'their_rb1': 20.0, 'their_rb2': 10.0, 'their_wr': 5.0,
+    }
+    return my_roster, partner, pd.DataFrame({1: scores})
+
+
+def test_compute_trade_suggestions_keeps_small_win_win_trades():
+    """The analyzer keeps every trade above zero, even under a full point per week."""
+    settings = DraftSettings(teams=2, slots={'RB': 1, 'WR': 1})
+    my_roster = pd.DataFrame({
+        'position': ['WR', 'WR'],
+        'first_name': ['My', 'My'],
+        'last_name': ['Starter', 'Extra'],
+    }, index=['my_starter', 'my_extra'])
+    partner = pd.DataFrame({
+        'position': ['RB', 'RB'],
+        'first_name': ['Their', 'Their'],
+        'last_name': ['Starter', 'Extra'],
+    }, index=['their_starter', 'their_extra'])
+    scores = {'my_starter': 20.0, 'my_extra': 0.5,
+              'their_starter': 20.0, 'their_extra': 0.5}
+    weekly_points = pd.DataFrame({1: scores})
+
+    offers = compute_trade_suggestions(
+        my_roster, partner, weekly_points, settings, partner_name='Partner')
+
+    match = offers[(offers['give_player_id'] == 'my_extra') &
+                   (offers['receive_player_id'] == 'their_extra')]
+    assert not match.empty
+    assert match.iloc[0]['my_uplift'] == pytest.approx(0.5)
+    assert match.iloc[0]['partner_uplift'] == pytest.approx(0.5)
+    assert (offers['my_uplift'] > 0).all()
+    assert (offers['partner_uplift'] > 0).all()
+    assert offers.iloc[0]['partner_name'] == 'Partner'
+
+
+def test_compute_trade_suggestions_applies_one_position_need_per_team():
+    """Each team's need only allows offers where that team receives that position."""
+    settings = DraftSettings(teams=2, slots={'RB': 1, 'WR': 1})
+    my_roster, partner, weekly_points = _analyzer_rosters()
+
+    offers = compute_trade_suggestions(
+        my_roster, partner, weekly_points, settings,
+        my_position='RB', partner_position='WR')
+
+    assert not offers.empty
+    assert all(p['position'] == 'RB' for players in offers['receive_players'] for p in players)
+    assert all(p['position'] == 'WR' for players in offers['give_players'] for p in players)
+    assert (offers['my_uplift'] > 0).all()
+    assert (offers['partner_uplift'] > 0).all()
+
+
+def test_compute_trade_suggestions_unreachable_need_returns_nothing():
+    settings = DraftSettings(teams=2, slots={'RB': 1, 'WR': 1})
+    my_roster, partner, weekly_points = _analyzer_rosters()
+
+    assert compute_trade_suggestions(
+        my_roster, partner, weekly_points, settings,
+        my_position='TE').empty
+    assert compute_trade_suggestions(
+        pd.DataFrame(), partner, weekly_points, settings).empty

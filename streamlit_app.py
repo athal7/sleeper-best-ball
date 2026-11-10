@@ -1408,6 +1408,61 @@ def compute_trade_recommendations(
     Every single-player swap is scored. Package searches use the eight highest
     projected players on each roster to bound the pairwise combinations.
     """
+    return _compute_trade_recommendations(
+        my_roster, opponent_rosters, weekly_points, settings,
+        projections=projections, playoff_week_start=playoff_week_start,
+        current_week=current_week, end_week=end_week)
+
+
+def compute_trade_suggestions(
+    my_roster: pd.DataFrame,
+    partner_roster: pd.DataFrame,
+    weekly_points: pd.DataFrame,
+    settings: DraftSettings,
+    my_position: Optional[str] = None,
+    partner_position: Optional[str] = None,
+    partner_id: str = 'partner',
+    partner_name: str = 'Trade partner',
+    projections: pd.DataFrame = None,
+    playoff_week_start: int | None = None,
+    current_week: int = 1,
+    end_week: int = 18,
+) -> pd.DataFrame:
+    """Find every swap between two teams that helps both of them.
+
+    Uses the same scoring as compute_trade_recommendations(), but keeps every
+    offer with a positive average weekly uplift for both sides instead of only
+    the ones clearing a full point. An optional position need per team keeps
+    only offers where that team receives players at that position.
+    """
+    if my_roster.empty or partner_roster.empty:
+        return pd.DataFrame()
+    return _compute_trade_recommendations(
+        my_roster,
+        {partner_id: {'name': partner_name, 'roster': partner_roster,
+                      'position': partner_position}},
+        weekly_points, settings, projections=projections,
+        playoff_week_start=playoff_week_start, current_week=current_week,
+        end_week=end_week, min_uplift=0.0, my_position=my_position)
+
+
+def _compute_trade_recommendations(
+    my_roster: pd.DataFrame,
+    opponent_rosters: dict[str, dict],
+    weekly_points: pd.DataFrame,
+    settings: DraftSettings,
+    projections: pd.DataFrame = None,
+    playoff_week_start: int | None = None,
+    current_week: int = 1,
+    end_week: int = 18,
+    min_uplift: float = 1.0,
+    my_position: Optional[str] = None,
+) -> pd.DataFrame:
+    """Score every candidate trade; each team must gain more than min_uplift per week.
+
+    A partner roster may carry a 'position' entry to require the players that
+    partner receives to all play that position.
+    """
     if my_roster.empty or not opponent_rosters:
         return pd.DataFrame()
 
@@ -1478,10 +1533,17 @@ def compute_trade_recommendations(
         opp_info = player_info(opp_roster)
         opp_choices = packages(opp_roster)
         opp_baseline, opp_states = roster_states(opp_roster, opp_info, opp_choices)
+        partner_position = opp_data.get('position')
 
         for give in my_choices:
             my_pos, give_pos, my_weeks = my_states[give]
+            if partner_position is not None and any(
+                    my_info[pid]['position'] != partner_position for pid in give):
+                continue
             for receive in opp_choices:
+                if my_position is not None and any(
+                        opp_info[pid]['position'] != my_position for pid in receive):
+                    continue
                 opp_pos, receive_pos, opp_weeks = opp_states[receive]
                 new_my_pos = np.concatenate((my_pos, receive_pos))
                 new_opp_pos = np.concatenate((opp_pos, give_pos))
@@ -1495,7 +1557,7 @@ def compute_trade_recommendations(
                                                      np.concatenate((opp_remaining, given_scores)), slots)
                     my_sum += weight * (new_my - my_baseline[i])
                     partner_sum += weight * (new_partner - opp_baseline[i])
-                if my_sum <= total_weight or partner_sum <= total_weight:
+                if my_sum <= min_uplift * total_weight or partner_sum <= min_uplift * total_weight:
                     continue
 
                 my_uplift = my_sum / total_weight
@@ -1794,6 +1856,17 @@ def render_trade_suggestions_table(recommendations: pd.DataFrame):
         st.html(doc.getvalue())
 
 
+def _build_league_roster(player_ids: list, bye_weeks: dict[str, int],
+                        projections: pd.DataFrame) -> pd.DataFrame:
+    """Roster frame for a set of Sleeper player ids, with projections attached."""
+    roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(list(player_ids)).dropna(subset=['position'])
+    roster['bye_week'] = roster['team'].map(bye_weeks)
+    roster = roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
+    roster['p50_weekly'] = roster['p50_weekly'].fillna(0.0)
+    roster['p90_weekly'] = roster['p90_weekly'].fillna(0.0)
+    return roster
+
+
 def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int, week: int):
     try:
         waiver_data = WaiverData(league_id=int(league_id), week=week)
@@ -1819,16 +1892,11 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
     projections = build_season_projections(weekly_points, adp)
 
     rosters_info = Data.get_rosters(int(league_id))
-    user_players = waiver_data.rosters.loc[user_roster_id, 'players'] if 'players' in waiver_data.rosters.columns else []
+    roster_players = (waiver_data.rosters['players']
+                      if 'players' in waiver_data.rosters.columns else {})
 
-    my_roster = build_my_roster([], user_id, bye_weeks)
-    if user_players:
-        my_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(user_players).dropna(subset=['position'])
-        my_roster['bye_week'] = my_roster['team'].map(bye_weeks)
-
-    my_roster = my_roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
-    my_roster['p50_weekly'] = my_roster['p50_weekly'].fillna(0.0)
-    my_roster['p90_weekly'] = my_roster['p90_weekly'].fillna(0.0)
+    my_roster = _build_league_roster(roster_players.get(user_roster_id, []) or [],
+                                     bye_weeks, projections)
 
     opponent_rosters = {}
     for rid, row in waiver_data.rosters.iterrows():
@@ -1837,11 +1905,7 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         opp_players = row.get('players', [])
         if not opp_players:
             continue
-        opp_roster = Data.get_players()[['position', 'first_name', 'last_name', 'team']].reindex(opp_players).dropna(subset=['position'])
-        opp_roster['bye_week'] = opp_roster['team'].map(bye_weeks)
-        opp_roster = opp_roster.join(projections[['p50_weekly', 'p90_weekly']], how='left')
-        opp_roster['p50_weekly'] = opp_roster['p50_weekly'].fillna(0.0)
-        opp_roster['p90_weekly'] = opp_roster['p90_weekly'].fillna(0.0)
+        opp_roster = _build_league_roster(opp_players, bye_weeks, projections)
 
         partner_name = f"Team {rid}"
         partner_username = ''
@@ -1857,13 +1921,70 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         }
 
     playoff_week_start = waiver_data.waiver_settings.get('playoff_week_start')
+    end_week = fantasy_season_end_week(waiver_data.waiver_settings)
 
+    _render_trade_analyzer(league_id, user_roster_id, my_roster, opponent_rosters,
+                           weekly_points, settings, projections, playoff_week_start,
+                           week, end_week)
+
+    st.markdown("#### All win-win trades in this league")
     recs = compute_trade_recommendations(
         my_roster, opponent_rosters, weekly_points, settings,
         projections=projections, playoff_week_start=playoff_week_start,
-        current_week=week, end_week=fantasy_season_end_week(waiver_data.waiver_settings))
+        current_week=week, end_week=end_week)
 
     render_trade_suggestions_table(recs)
+
+
+def _render_trade_analyzer(league_id: str, user_roster_id, my_roster: pd.DataFrame,
+                           opponent_rosters: dict[str, dict], weekly_points: pd.DataFrame,
+                           settings: DraftSettings, projections: pd.DataFrame,
+                           playoff_week_start: Optional[int], week: int, end_week: int):
+    """Pick two teams plus an optional position need each, then list every offer above zero."""
+    labels = {user_roster_id: 'Your team'}
+    rosters = {user_roster_id: my_roster}
+    for rid, data in opponent_rosters.items():
+        labels[rid] = data['name']
+        rosters[rid] = data['roster']
+    if len(labels) < 2:
+        return
+
+    positions = sorted({p for roster in rosters.values() for p in roster['position']})
+    needs = ['Any position'] + positions
+    partner_ids = [rid for rid in labels if rid != user_roster_id]
+
+    st.markdown("#### Trade analyzer")
+    my_col, partner_col = st.columns(2)
+    with my_col:
+        my_team = st.selectbox(
+            "Team 1", list(labels), format_func=labels.get,
+            key=f'trade_team_a_{league_id}')
+        my_need = st.selectbox(
+            "Team 1 position need", needs, key=f'trade_need_a_{league_id}')
+    with partner_col:
+        partner_team = st.selectbox(
+            "Team 2", partner_ids, format_func=labels.get,
+            key=f'trade_team_b_{league_id}')
+        partner_need = st.selectbox(
+            "Team 2 position need", needs, key=f'trade_need_b_{league_id}')
+
+    if my_team == partner_team:
+        st.info("Pick two different teams to analyze a trade.")
+        return
+
+    suggestions = compute_trade_suggestions(
+        rosters[my_team], rosters[partner_team], weekly_points, settings,
+        my_position=None if my_need == 'Any position' else my_need,
+        partner_position=None if partner_need == 'Any position' else partner_need,
+        partner_id=partner_team, partner_name=labels[partner_team],
+        projections=projections, playoff_week_start=playoff_week_start,
+        current_week=week, end_week=end_week)
+
+    if suggestions.empty:
+        st.info("No trades improve both teams. Try a different pair or opening up the position needs.")
+        return
+    st.caption(f"{len(suggestions)} trades help both teams.")
+    render_trade_suggestions_table(suggestions)
 
 
 def render_trade_suggestions(username: str, week: int):
