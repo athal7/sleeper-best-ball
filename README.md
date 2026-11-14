@@ -20,7 +20,13 @@ The `ios/` folder contains a native SwiftUI app and a Home Screen widget that sh
 - Each matchup shows every roster's best-ball lineup, current points, optimistic projection, and live game state.
 - The widget refreshes from Sleeper about every 30 minutes and falls back to the last snapshot saved by the app.
 
-Open `ios/BestBall.xcodeproj` in Xcode 15 or newer and run the `BestBall` scheme (iOS 17+). Both targets use the App Group `group.com.sleeperbestball.app`; select your development team and make sure that group exists in your account before running on a device.
+Open `ios/BestBall.xcodeproj` in Xcode 15 or newer and run the `BestBall` scheme (iOS 17+), choosing your Apple ID team under Signing & Capabilities.
+
+A free Apple ID is enough to install on your own iPhone: the build lasts seven days before you re-run it from Xcode. Free teams cannot use App Groups, so the project ships without that capability and the widget stays on its "open the app" placeholder.
+
+To let the widget share the selected league, join the paid Developer Program and add the App Group `group.$(BB_BUNDLE_ID)` to both targets in Xcode. `SharedStore` picks the group up through the `BBAppGroup` Info.plist key and falls back to standard defaults when the group is unavailable.
+
+`BB_BUNDLE_ID` is a project build setting (default `com.sleeperbestball.app`); change it if that identifier is already taken, since free teams can only sign identifiers nobody else has claimed.
 
 Projection and lineup logic lives in the `ios/BestBallKit` Swift package and has no dependency on SwiftUI, so it can be tested from the command line:
 

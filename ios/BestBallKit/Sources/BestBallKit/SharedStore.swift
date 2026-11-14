@@ -71,8 +71,21 @@ public enum SharedStore {
     private static let snapshotKey = "bestball.widgetSnapshot"
     private static let playersFileName = "players.json"
 
+    /// Falls back to this process's own defaults when the App Group isn't
+    /// available (free Apple ID signing can't use App Groups). The app keeps
+    /// working; only the widget loses access to the saved league.
     public static var defaults: UserDefaults {
-        UserDefaults(suiteName: AppGroup.identifier) ?? .standard
+        guard hasAppGroup,
+              let shared = UserDefaults(suiteName: AppGroup.identifier) else {
+            return .standard
+        }
+        return shared
+    }
+
+    public static var hasAppGroup: Bool {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: AppGroup.identifier
+        ) != nil
     }
 
     // MARK: League selection
@@ -123,7 +136,7 @@ public enum SharedStore {
 
     private static func cacheURL(_ fileName: String) -> URL? {
         let directory: URL?
-        if let container = FileManager.default.containerURL(
+        if hasAppGroup, let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: AppGroup.identifier
         ) {
             directory = container.appendingPathComponent("Caches", isDirectory: true)
