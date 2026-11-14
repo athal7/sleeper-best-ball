@@ -11,3 +11,22 @@ Live Scores keeps rostered players even when Sleeper lists no NFL team for them.
 The Waiver Guide considers dropping any rostered player, regardless of position, and groups adds that improve the lineup by more than 1 projected point per week on average under the best player to drop. It shows the five highest-ranked adds for each drop. Trade Suggestions groups win-win offers by partner and considers 1-for-1, 1-for-2, 2-for-1, and 2-for-2 trades. Each team must gain more than 1 projected point per week on average (with playoff weeks weighted more heavily). Both tools score only from the selected current week through the league’s championship week, including custom playoff lengths and multiweek rounds. Every 1-for-1 is evaluated; two-player packages use each roster's eight highest-projected candidates. Uneven trades may require a roster spot. Its trade analyzer takes any two teams plus an optional position need for each and lists every offer that improves both of them by any amount. Player names open Sleeper web profiles.
 
 Draft, waiver, and trade recommendations share raw season projections across users and apply league scoring settings per request. Live matchup projections reuse the same weekly raw data. Scored weekly projection inputs are reused for identical seasons and scoring settings until the hourly projection refresh. Projection caches refresh at each hour boundary; the first season load still fetches all 18 regular-season weeks.
+
+## 📱 iOS app and widget
+
+The `ios/` folder contains a native SwiftUI app and a Home Screen widget that show the same optimistic projections and best-ball lineups as the Streamlit app.
+
+- Connect with a Sleeper username, pick a league, and browse weeks 1–18.
+- Each matchup shows every roster's best-ball lineup, current points, optimistic projection, and live game state.
+- The widget refreshes from Sleeper about every 30 minutes and falls back to the last snapshot saved by the app.
+
+Open `ios/BestBall.xcodeproj` in Xcode 15 or newer and run the `BestBall` scheme (iOS 17+). Both targets use the App Group `group.com.sleeperbestball.app`; select your development team and make sure that group exists in your account before running on a device.
+
+Projection and lineup logic lives in the `ios/BestBallKit` Swift package and has no dependency on SwiftUI, so it can be tested from the command line:
+
+```bash
+cd ios/BestBallKit
+swift test
+```
+
+The waiver guide, trade tools, and draft assistant are not part of the iOS app yet.
