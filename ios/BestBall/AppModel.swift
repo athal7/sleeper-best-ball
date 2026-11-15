@@ -18,9 +18,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var leagues: [LeagueSummary] = []
     @Published var setupError: String?
 
+    @Published private(set) var isTrackingLiveActivity = LiveActivityController.shared.isTracking
+
     private let service = BestBallService()
+    private let liveActivities = LiveActivityController.shared
     private var account: SleeperAccount?
+    private var snapshot: WidgetSnapshot?
     private var hasStarted = false
+
+    /// Set when the user dismisses the Live Activity so refreshes don't bring it
+    /// back until they ask for it again.
+    private static let liveActivityMutedKey = "bestball.liveActivityMuted"
 
     static let weeks = 1...18
 
@@ -92,6 +100,23 @@ final class AppModel: ObservableObject {
         account = nil
         username = ""
         errorMessage = nil
+        snapshot = nil
+        isTrackingLiveActivity = false
+        Task { await liveActivities.end() }
+    }
+
+    // MARK: Live Activity
+
+    /// Starts or stops the Live Activity that tracks this matchup's score.
+    func toggleLiveActivity() async {
+        if liveActivities.isTracking {
+            await liveActivities.end()
+            UserDefaults.standard.set(true, forKey: Self.liveActivityMutedKey)
+        } else {
+            UserDefaults.standard.set(false, forKey: Self.liveActivityMutedKey)
+            if let snapshot { await liveActivities.sync(snapshot) }
+        }
+        isTrackingLiveActivity = liveActivities.isTracking
     }
 
     // MARK: Weeks
@@ -118,9 +143,11 @@ final class AppModel: ObservableObject {
 
             if let snapshot = loaded.widgetSnapshot() {
                 SharedStore.saveSnapshot(snapshot)
+                self.snapshot = snapshot
                 #if canImport(WidgetKit)
                 WidgetCenter.shared.reloadAllTimelines()
                 #endif
+                await updateLiveActivity(snapshot, week: clamped)
             }
         } catch {
             errorMessage = message(for: error)
@@ -137,6 +164,18 @@ final class AppModel: ObservableObject {
 
     func showNextWeek() async {
         await load(week: (week?.week ?? config?.week ?? 1) + 1)
+    }
+
+    /// Tracks the current week automatically; other weeks only refresh an
+    /// activity that's already running.
+    private func updateLiveActivity(_ snapshot: WidgetSnapshot, week: Int) async {
+        let muted = UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey)
+        if liveActivities.isTracking {
+            await liveActivities.sync(snapshot)
+        } else if !muted, week == state?.defaultWeek {
+            await liveActivities.sync(snapshot)
+        }
+        isTrackingLiveActivity = liveActivities.isTracking
     }
 
     // MARK: Helpers

@@ -69,6 +69,9 @@ struct MatchupsView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    liveActivityButton
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     weekMenu
                 }
             }
@@ -118,6 +121,20 @@ struct MatchupsView: View {
             }
             .padding(.vertical, 2)
         }
+    }
+
+    private var liveActivityButton: some View {
+        Button {
+            Task { await model.toggleLiveActivity() }
+        } label: {
+            Label(
+                model.isTrackingLiveActivity ? "Stop Live Activity" : "Track matchup live",
+                systemImage: model.isTrackingLiveActivity
+                    ? "bolt.horizontal.circle.fill"
+                    : "bolt.horizontal.circle"
+            )
+        }
+        .disabled(model.week == nil)
     }
 
     private var weekMenu: some View {

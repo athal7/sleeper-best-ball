@@ -88,6 +88,7 @@ struct BestBallWidget: Widget {
 struct BestBallWidgetBundle: WidgetBundle {
     var body: some Widget {
         BestBallWidget()
+        MatchupLiveActivityWidget()
     }
 }
 

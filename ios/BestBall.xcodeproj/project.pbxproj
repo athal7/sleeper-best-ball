@@ -18,6 +18,10 @@
 		3C4D5E6F7081000000000009 /* BestBallWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F70000000000009 /* BestBallWidget.swift */; };
 		3C4D5E6F708100000000000A /* BestBallKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F00000000000C /* BestBallKit */; };
 		3C4D5E6F708100000000000B /* BestBallWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A2B3C4D5E6F000000000009 /* BestBallWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		3C4D5E6F708100000000000C /* MatchupActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */; };
+		3C4D5E6F708100000000000D /* MatchupActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */; };
+		3C4D5E6F708100000000000E /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000E /* LiveActivityController.swift */; };
+		3C4D5E6F708100000000000F /* MatchupLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +59,9 @@
 		2B3C4D5E6F70000000000006 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F70000000000007 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		2B3C4D5E6F70000000000009 /* BestBallWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BestBallWidget.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchupActivityAttributes.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F7000000000000E /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchupLiveActivity.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F7000000000000A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -82,6 +89,7 @@
 			children = (
 				1A2B3C4D5E6F000000000004 /* BestBall */,
 				1A2B3C4D5E6F000000000005 /* BestBallWidget */,
+				1A2B3C4D5E6F000000000020 /* Shared */,
 				1A2B3C4D5E6F000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -104,6 +112,7 @@
 				2B3C4D5E6F70000000000004 /* MatchupsView.swift */,
 				2B3C4D5E6F70000000000005 /* MatchupDetailView.swift */,
 				2B3C4D5E6F70000000000006 /* Components.swift */,
+				2B3C4D5E6F7000000000000E /* LiveActivityController.swift */,
 				2B3C4D5E6F70000000000007 /* Assets.xcassets */,
 			);
 			path = BestBall;
@@ -113,9 +122,18 @@
 			isa = PBXGroup;
 			children = (
 				2B3C4D5E6F70000000000009 /* BestBallWidget.swift */,
+				2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */,
 				2B3C4D5E6F7000000000000A /* Info.plist */,
 			);
 			path = BestBallWidget;
+			sourceTree = "<group>";
+		};
+		1A2B3C4D5E6F000000000020 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -231,6 +249,8 @@
 				3C4D5E6F7081000000000004 /* MatchupsView.swift in Sources */,
 				3C4D5E6F7081000000000005 /* MatchupDetailView.swift in Sources */,
 				3C4D5E6F7081000000000006 /* Components.swift in Sources */,
+				3C4D5E6F708100000000000E /* LiveActivityController.swift in Sources */,
+				3C4D5E6F708100000000000C /* MatchupActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -239,6 +259,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				3C4D5E6F7081000000000009 /* BestBallWidget.swift in Sources */,
+				3C4D5E6F708100000000000F /* MatchupLiveActivity.swift in Sources */,
+				3C4D5E6F708100000000000D /* MatchupActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -405,6 +427,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_BBAppGroup = "group.$(BB_BUNDLE_ID)";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Best Ball";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -435,6 +458,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_BBAppGroup = "group.$(BB_BUNDLE_ID)";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Best Ball";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
