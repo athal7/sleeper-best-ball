@@ -2,38 +2,73 @@ import ActivityKit
 import Foundation
 import BestBallKit
 
-/// Keeps one Live Activity in sync with the user's matchup for the week the app
-/// is showing. Updates happen from the app's own refresh, so no push server is
+/// Keeps one Live Activity per league in sync with the user's matchup for the
+/// current week. Updates happen from the app's own refresh, so no push server is
 /// involved.
 @MainActor
 final class LiveActivityController {
+    /// One league's matchup for the activity to show.
+    struct TrackedMatchup: Sendable {
+        let leagueID: String
+        let leagueName: String
+        let snapshot: WidgetSnapshot
+    }
+
+    /// The system only keeps a handful of concurrent Live Activities alive, so
+    /// tracking is capped at the first few leagues rather than silently failing.
+    static let maxActivities = 5
+
     static let shared = LiveActivityController()
 
     private init() {}
 
     var isAuthorized: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
     var isTracking: Bool { !Activity<MatchupActivityAttributes>.activities.isEmpty }
+    var trackedLeagueIDs: Set<String> {
+        Set(Activity<MatchupActivityAttributes>.activities.map(\.attributes.leagueID))
+    }
 
-    /// Starts tracking the matchup, or refreshes the activity that's already
-    /// running. A no-op when the user has Live Activities turned off for the app.
-    func sync(_ snapshot: WidgetSnapshot) async {
+    /// Starts an activity for each matchup that doesn't have one, refreshes the
+    /// ones that do, and ends activities for leagues that dropped out (a week
+    /// ending, a league being swapped).
+    func sync(_ matchups: [TrackedMatchup]) async {
         guard isAuthorized else { return }
-        let content = ActivityContent(state: snapshot.contentState, staleDate: staleDate(snapshot))
-        if let activity = Activity<MatchupActivityAttributes>.activities.first {
-            await activity.update(content)
-            return
+
+        for matchup in matchups {
+            let content = ActivityContent(
+                state: matchup.snapshot.contentState,
+                staleDate: staleDate(matchup.snapshot)
+            )
+            if let existing = activity(for: matchup.leagueID) {
+                await existing.update(content)
+            } else if Activity<MatchupActivityAttributes>.activities.count < Self.maxActivities {
+                _ = try? Activity.request(
+                    attributes: MatchupActivityAttributes(
+                        leagueID: matchup.leagueID,
+                        leagueName: matchup.leagueName
+                    ),
+                    content: content,
+                    pushType: nil
+                )
+            }
         }
-        _ = try? Activity.request(
-            attributes: MatchupActivityAttributes(leagueName: snapshot.leagueName),
-            content: content,
-            pushType: nil
-        )
+
+        let keep = Set(matchups.map(\.leagueID))
+        for activity in Activity<MatchupActivityAttributes>.activities
+        where !keep.contains(activity.attributes.leagueID) {
+            await activity.end(nil, dismissalPolicy: .immediate)
+        }
     }
 
     func end() async {
         for activity in Activity<MatchupActivityAttributes>.activities {
             await activity.end(nil, dismissalPolicy: .immediate)
         }
+    }
+
+    private func activity(for leagueID: String) -> Activity<MatchupActivityAttributes>? {
+        Activity<MatchupActivityAttributes>.activities
+            .first { $0.attributes.leagueID == leagueID }
     }
 
     /// The scores go stale once the week's games are done; the system dims the

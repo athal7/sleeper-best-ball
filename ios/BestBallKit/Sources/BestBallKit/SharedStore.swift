@@ -68,6 +68,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 /// App Group backed storage shared by the app and the widget extension.
 public enum SharedStore {
     private static let configKey = "bestball.savedLeague"
+    private static let accountKey = "bestball.accountUsername"
     private static let snapshotKey = "bestball.widgetSnapshot"
     private static let playersFileName = "players.json"
 
@@ -86,6 +87,23 @@ public enum SharedStore {
         FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: AppGroup.identifier
         ) != nil
+    }
+
+    // MARK: Account
+
+    /// The Sleeper username belongs to the account, not to whichever league is
+    /// selected, so it outlives `clearConfig()` and users only type it once.
+    public static func saveUsername(_ username: String) {
+        defaults.set(username, forKey: accountKey)
+    }
+
+    public static func loadUsername() -> String? {
+        let value = defaults.string(forKey: accountKey)
+        return (value?.isEmpty == false) ? value : nil
+    }
+
+    public static func clearUsername() {
+        defaults.removeObject(forKey: accountKey)
     }
 
     // MARK: League selection

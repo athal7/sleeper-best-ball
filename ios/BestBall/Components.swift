@@ -83,48 +83,65 @@ struct AvatarView: View {
     }
 }
 
-struct TeamRow: View {
-    let team: TeamScore
-
-    var body: some View {
-        HStack(spacing: 12) {
-            AvatarView(team: team)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(team.name)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Text("\(team.record) · #\(team.rank)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(team.points.scoreText)
-                    .font(.headline.monospacedDigit())
-                Text("proj \(team.projected.scoreText)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 struct MatchupCard: View {
     let matchup: MatchupScore
     let userRosterID: Int?
 
+    private var isUserMatchup: Bool { matchup.contains(rosterID: userRosterID) }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if matchup.contains(rosterID: userRosterID) {
-                Text("YOUR MATCHUP")
+        VStack(alignment: .leading, spacing: 8) {
+            if isUserMatchup {
+                Label("YOUR MATCHUP", systemImage: "flame.fill")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.tint)
             }
-            ForEach(matchup.teams) { team in
-                TeamRow(team: team)
+
+            HStack(alignment: .top, spacing: 8) {
+                if let home = matchup.teams.first {
+                    MatchupSide(team: home, alignment: .leading, isUser: home.id == userRosterID)
+                }
+
+                Text("vs")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 14)
+
+                if matchup.teams.count > 1 {
+                    let away = matchup.teams[1]
+                    MatchupSide(team: away, alignment: .trailing, isUser: away.id == userRosterID)
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// One half of a matchup card: team identity on top, then the points that
+/// actually matter, with the projection as supporting detail.
+private struct MatchupSide: View {
+    let team: TeamScore
+    let alignment: HorizontalAlignment
+    let isUser: Bool
+
+    var body: some View {
+        VStack(alignment: alignment, spacing: 3) {
+            HStack(spacing: 6) {
+                AvatarView(team: team, size: 22)
+                Text(team.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+
+            Text(team.points.scoreText)
+                .font(.system(.title2, design: .rounded).weight(.bold).monospacedDigit())
+                .foregroundStyle(isUser ? Color.accentColor : Color.primary)
+
+            Text("proj \(team.projected.scoreText)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
     }
 }
 
@@ -184,26 +201,38 @@ struct PlayerRow: View {
 
 struct TeamScoreboard: View {
     let team: TeamScore
+    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                AvatarView(team: team, size: 28)
+        VStack(alignment: alignment, spacing: 4) {
+            HStack(spacing: 6) {
+                AvatarView(team: team, size: 26)
                 Text(team.name)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(team.projected.scoreText)
-                    .font(.system(size: 34, weight: .bold, design: .rounded).monospacedDigit())
-                Text("proj")
-                    .font(.caption)
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(team.points.scoreText)
+                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                Text("pts")
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
-            Text("\(team.points.scoreText) pts · \(team.playedCounts)")
-                .font(.caption2)
+
+            Text("proj \(team.projected.scoreText)")
+                .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+
+            Text("\(team.record) · #\(team.rank)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            Text(team.playedCounts)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
     }
 }

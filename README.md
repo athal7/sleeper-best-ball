@@ -28,7 +28,9 @@ To let the widget share the selected league, join the paid Developer Program and
 
 `BB_BUNDLE_ID` is a project build setting (default `com.sleeperbestball.app`); change it if that identifier is already taken, since free teams can only sign identifiers nobody else has claimed.
 
-The app starts a Live Activity for the current week's matchup when you open it, showing both sides' live and projected points on the Lock Screen and in the Dynamic Island. It updates every time the app refreshes (no push server involved), and the bolt button in the toolbar stops it until you turn it back on. Live Activities need no App Group, so they work on a free team.
+The app starts a Live Activity for the current week's matchup in **every in-season league** when you open it, each showing both sides' live and projected points on the Lock Screen and in the Dynamic Island. They update every time the app refreshes (no push server involved), and the bolt button in the toolbar stops all of them until you turn them back on. iOS only keeps a handful of Live Activities alive at once, so tracking is capped at the first five in-season leagues. Live Activities need no App Group, so they work on a free team.
+
+Your Sleeper username is remembered at the account level, so changing leagues doesn't make you retype it — and the leagues you're in are loaded as soon as the app opens.
 
 Projection and lineup logic lives in the `ios/BestBallKit` Swift package and has no dependency on SwiftUI, so it can be tested from the command line:
 

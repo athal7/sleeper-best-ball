@@ -16,5 +16,8 @@ struct MatchupActivityAttributes: ActivityAttributes {
         var updated: Date
     }
 
+    /// Identifies which league's activity this is, so one app can track several
+    /// leagues and update each activity independently.
+    var leagueID: String
     var leagueName: String
 }
