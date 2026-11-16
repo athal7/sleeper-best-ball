@@ -99,7 +99,7 @@ struct MatchupCard: View {
 
             HStack(alignment: .top, spacing: 8) {
                 if let home = matchup.teams.first {
-                    MatchupSide(team: home, alignment: .leading, isUser: home.id == userRosterID)
+                    MatchupSide(team: home, isUser: home.id == userRosterID)
                 }
 
                 Text("vs")
@@ -109,7 +109,7 @@ struct MatchupCard: View {
 
                 if matchup.teams.count > 1 {
                     let away = matchup.teams[1]
-                    MatchupSide(team: away, alignment: .trailing, isUser: away.id == userRosterID)
+                    MatchupSide(team: away, isUser: away.id == userRosterID)
                 }
             }
         }
@@ -121,11 +121,10 @@ struct MatchupCard: View {
 /// actually matter, with the projection as supporting detail.
 private struct MatchupSide: View {
     let team: TeamScore
-    let alignment: HorizontalAlignment
     let isUser: Bool
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 AvatarView(team: team, size: 22)
                 Text(team.name)
@@ -141,7 +140,7 @@ private struct MatchupSide: View {
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -201,10 +200,9 @@ struct PlayerRow: View {
 
 struct TeamScoreboard: View {
     let team: TeamScore
-    var alignment: HorizontalAlignment = .leading
 
     var body: some View {
-        VStack(alignment: alignment, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 AvatarView(team: team, size: 26)
                 Text(team.name)
@@ -233,6 +231,6 @@ struct TeamScoreboard: View {
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

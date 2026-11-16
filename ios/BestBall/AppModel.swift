@@ -7,18 +7,20 @@ import WidgetKit
 
 @MainActor
 final class AppModel: ObservableObject {
-    @Published private(set) var config: SavedLeague?
-    @Published private(set) var week: LeagueWeek?
+    /// Every league you're in, scored for the week you're looking at.
+    @Published private(set) var leagueWeeks: [LeagueWeek] = []
+    @Published private(set) var week = 1
     @Published private(set) var state: SportState?
     @Published private(set) var isLoading = false
     @Published private(set) var isConnecting = false
+    @Published private(set) var isConnected = false
     @Published var errorMessage: String?
 
     @Published var username = ""
     @Published private(set) var leagues: [LeagueSummary] = []
     @Published var setupError: String?
 
-    /// The matchups screen starts on your own game; the full slate is a tap away.
+    /// The scores start on your own games; the full slate is a tap away.
     @Published var showOnlyMyMatchups = true
 
     @Published private(set) var isTrackingLiveActivity = LiveActivityController.shared.isTracking
@@ -26,7 +28,6 @@ final class AppModel: ObservableObject {
     private let service = BestBallService()
     private let liveActivities = LiveActivityController.shared
     private var account: SleeperAccount?
-    private var snapshot: WidgetSnapshot?
     private var hasStarted = false
 
     /// Set when the user dismisses the Live Activities so refreshes don't bring
@@ -35,17 +36,23 @@ final class AppModel: ObservableObject {
 
     static let weeks = 1...18
 
-    var isConnected: Bool { config != nil }
     var currentSeason: Int {
         state.flatMap { Int($0.leagueSeason) } ?? Calendar.current.component(.year, from: Date())
     }
 
-    /// Your matchup first when the filter is on, otherwise the whole week.
-    var visibleMatchups: [MatchupScore] {
-        guard let week else { return [] }
-        guard showOnlyMyMatchups, week.userRosterID != nil else { return week.matchups }
-        let mine = week.matchups.filter { $0.contains(rosterID: week.userRosterID) }
-        return mine.isEmpty ? week.matchups : mine
+    var trackedLeagueCount: Int { liveActivities.trackedLeagueIDs.count }
+
+    /// Leagues that actually have something to show this week.
+    var visibleLeagues: [LeagueWeek] {
+        leagueWeeks.filter { !matchups(in: $0).isEmpty }
+    }
+
+    func matchups(in leagueWeek: LeagueWeek) -> [MatchupScore] {
+        guard showOnlyMyMatchups, leagueWeek.userRosterID != nil else {
+            return leagueWeek.matchups
+        }
+        let mine = leagueWeek.matchups.filter { $0.contains(rosterID: leagueWeek.userRosterID) }
+        return mine.isEmpty ? leagueWeek.matchups : mine
     }
 
     // MARK: Lifecycle
@@ -53,18 +60,15 @@ final class AppModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
-        config = SharedStore.loadConfig()
-        username = SharedStore.loadUsername() ?? config?.username ?? ""
         state = try? await service.sportState()
-        if let config {
-            await load(week: config.week)
+
+        guard let saved = SharedStore.loadUsername() else {
+            username = SharedStore.loadConfig()?.username ?? ""
+            return
         }
-        // The account is remembered independently of the league, so the league
-        // picker is ready without retyping the username.
-        if !username.isEmpty {
-            try? await fetchAccount(username: username)
-        }
-        await refreshLiveActivities()
+        username = saved
+        isConnected = true
+        await loadAll(week: state?.defaultWeek ?? 1)
     }
 
     // MARK: Setup
@@ -83,43 +87,24 @@ final class AppModel: ObservableObject {
             try await fetchAccount(username: name)
             username = name
             SharedStore.saveUsername(name)
-            if leagues.isEmpty {
-                setupError = "No \(currentSeason) NFL leagues found for that account."
-            }
-            await refreshLiveActivities()
+            isConnected = true
+            await loadAll(week: state?.defaultWeek ?? 1)
         } catch {
             setupError = message(for: error)
         }
     }
 
-    func selectLeague(_ league: LeagueSummary) async {
-        guard let account else { return }
-        let season = Int(league.season) ?? currentSeason
-        let config = SavedLeague(
-            username: account.displayName ?? account.username ?? username,
-            userID: account.userID,
-            leagueID: league.leagueID,
-            leagueName: league.name,
-            season: season,
-            week: state?.defaultWeek ?? 1
-        )
-        self.config = config
-        username = config.username
-        SharedStore.saveConfig(config)
-        SharedStore.saveUsername(config.username)
-        await load(week: config.week)
-        await refreshLiveActivities()
-    }
-
-    /// Leaves the league but keeps the account, so picking another one doesn't
-    /// mean retyping your username. Live Activities for your other leagues keep
-    /// running.
     func signOut() {
+        SharedStore.clearUsername()
         SharedStore.clearConfig()
-        config = nil
-        week = nil
+        username = ""
+        account = nil
+        leagues = []
+        leagueWeeks = []
         errorMessage = nil
-        snapshot = nil
+        isConnected = false
+        isTrackingLiveActivity = false
+        Task { await liveActivities.end() }
     }
 
     // MARK: Live Activities
@@ -132,114 +117,116 @@ final class AppModel: ObservableObject {
             isTrackingLiveActivity = false
         } else {
             UserDefaults.standard.set(false, forKey: Self.liveActivityMutedKey)
-            await refreshLiveActivities()
+            await syncLiveActivities(from: leagueWeeks)
         }
     }
 
-    /// One Live Activity per in-season league, all tracking the current week.
-    func refreshLiveActivities() async {
+    /// One Live Activity per league, all tracking the week on screen.
+    private func syncLiveActivities(from weeks: [LeagueWeek]) async {
         guard !UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey) else { return }
-        guard !username.isEmpty else { return }
-
-        if account == nil || leagues.isEmpty {
-            try? await fetchAccount(username: username)
-        }
-        guard let account else { return }
-
-        let currentWeek = state?.defaultWeek ?? 1
-        let userID = account.userID
-        let plans = leagues
-            .filter { $0.status == "in_season" }
-            .prefix(LiveActivityController.maxActivities)
-            .map { (id: $0.leagueID, name: $0.name) }
-        guard !plans.isEmpty else {
-            await liveActivities.end()
+        guard liveActivities.isAuthorized else {
             isTrackingLiveActivity = false
             return
         }
 
-        let service = self.service
-        let matchups = await withTaskGroup(
-            of: LiveActivityController.TrackedMatchup?.self
-        ) { group in
-            for plan in plans {
-                group.addTask {
-                    guard let loaded = try? await service.loadWeek(
-                        leagueID: plan.id,
-                        week: currentWeek,
-                        userID: userID
-                    ), let snapshot = loaded.widgetSnapshot() else {
-                        return nil
-                    }
-                    return LiveActivityController.TrackedMatchup(
-                        leagueID: plan.id,
-                        leagueName: plan.name,
-                        snapshot: snapshot
-                    )
-                }
+        let matchups = weeks.prefix(LiveActivityController.maxActivities).compactMap { week in
+            week.widgetSnapshot().map {
+                LiveActivityController.TrackedMatchup(
+                    leagueID: week.leagueID,
+                    leagueName: week.leagueName,
+                    snapshot: $0
+                )
             }
-            var results: [LiveActivityController.TrackedMatchup] = []
-            for await result in group {
-                if let result { results.append(result) }
-            }
-            return results
         }
-
         await liveActivities.sync(matchups)
         isTrackingLiveActivity = liveActivities.isTracking
     }
 
     // MARK: Weeks
 
-    func load(week targetWeek: Int) async {
-        guard let config else { return }
-        let clamped = min(max(targetWeek, Self.weeks.lowerBound), Self.weeks.upperBound)
+    /// Loads every league you're in for one week, then syncs the Live Activities
+    /// from the same results instead of fetching twice.
+    func loadAll(week targetWeek: Int) async {
+        guard isConnected else { return }
+        week = min(max(targetWeek, Self.weeks.lowerBound), Self.weeks.upperBound)
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
-        do {
-            let loaded = try await service.loadWeek(
-                leagueID: config.leagueID,
-                week: clamped,
-                userID: config.userID
-            )
-            week = loaded
+        if state == nil { state = try? await service.sportState() }
 
-            var updated = config
-            updated.week = clamped
-            self.config = updated
-            SharedStore.saveConfig(updated)
-
-            if let snapshot = loaded.widgetSnapshot() {
-                SharedStore.saveSnapshot(snapshot)
-                self.snapshot = snapshot
-                #if canImport(WidgetKit)
-                WidgetCenter.shared.reloadAllTimelines()
-                #endif
+        if account == nil || leagues.isEmpty {
+            do {
+                try await fetchAccount(username: username)
+            } catch {
+                errorMessage = message(for: error)
+                return
             }
-        } catch {
-            errorMessage = message(for: error)
         }
+
+        guard let account else { return }
+
+        let inSeason = leagues.filter { $0.status == "in_season" }
+        let plans = (inSeason.isEmpty ? leagues : inSeason)
+            .map { (id: $0.leagueID, name: $0.name) }
+        guard !plans.isEmpty else {
+            leagueWeeks = []
+            errorMessage = "No \(currentSeason) NFL leagues found for that account."
+            return
+        }
+
+        let service = self.service
+        let userID = account.userID
+        let currentWeek = week
+        let loaded = await withTaskGroup(of: (Int, LeagueWeek?).self) { group in
+            for (index, plan) in plans.enumerated() {
+                group.addTask {
+                    let week = try? await service.loadWeek(
+                        leagueID: plan.id,
+                        week: currentWeek,
+                        userID: userID
+                    )
+                    return (index, week)
+                }
+            }
+            var results: [(Int, LeagueWeek?)] = []
+            for await result in group { results.append(result) }
+            return results.sorted { $0.0 < $1.0 }.compactMap(\.1)
+        }
+
+        leagueWeeks = loaded
+
+        // The widget only has room for one league, so it keeps the first one.
+        if let snapshot = loaded.first?.widgetSnapshot() {
+            SharedStore.saveSnapshot(snapshot)
+            #if canImport(WidgetKit)
+            WidgetCenter.shared.reloadAllTimelines()
+            #endif
+        }
+
+        if loaded.isEmpty {
+            errorMessage = "Couldn't load week \(week) from Sleeper."
+        }
+
+        await syncLiveActivities(from: loaded)
     }
 
     func refresh() async {
-        await load(week: week?.week ?? config?.week ?? 1)
-        await refreshLiveActivities()
+        await loadAll(week: week)
     }
 
     func showPreviousWeek() async {
-        await load(week: (week?.week ?? config?.week ?? 1) - 1)
+        await loadAll(week: week - 1)
     }
 
     func showNextWeek() async {
-        await load(week: (week?.week ?? config?.week ?? 1) + 1)
+        await loadAll(week: week + 1)
     }
 
     // MARK: Helpers
 
     private func fetchAccount(username name: String) async throws {
-        if state == nil { state = try await service.sportState() }
+        if state == nil { state = try? await service.sportState() }
         let result = try await service.lookup(username: name, season: currentSeason)
         account = result.account
         leagues = result.leagues.sorted(by: Self.leagueOrder)

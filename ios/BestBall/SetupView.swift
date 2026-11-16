@@ -16,26 +16,15 @@ struct SetupView: View {
                 } header: {
                     Text("Your Sleeper account")
                 } footer: {
-                    Text("Leagues for the \(String(model.currentSeason)) NFL season are loaded straight from Sleeper. Nothing is stored on a server.")
+                    Text("Every \(String(model.currentSeason)) NFL league you're in is loaded straight from Sleeper and shown on one screen. Nothing is stored on a server, and you only type your username once.")
                 }
 
                 if model.isConnecting {
                     Section {
                         HStack(spacing: 12) {
                             ProgressView()
-                            Text("Finding your leagues…")
+                            Text("Loading every league you're in…")
                                 .foregroundStyle(.secondary)
-                        }
-                    }
-                } else if !model.leagues.isEmpty {
-                    Section("Choose a league") {
-                        ForEach(model.leagues) { league in
-                            Button {
-                                Task { await model.selectLeague(league) }
-                            } label: {
-                                LeagueRow(league: league)
-                            }
-                            .buttonStyle(.plain)
                         }
                     }
                 } else {
@@ -43,7 +32,7 @@ struct SetupView: View {
                         Button {
                             Task { await model.connect() }
                         } label: {
-                            Label("Connect", systemImage: "arrow.right.circle.fill")
+                            Label("Show my scores", systemImage: "arrow.right.circle.fill")
                         }
                         .disabled(model.username.trimmingCharacters(in: .whitespaces).isEmpty)
                     }

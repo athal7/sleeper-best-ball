@@ -22,7 +22,7 @@ struct MatchupDetailView: View {
             Section {
                 HStack(alignment: .top, spacing: 10) {
                     if let myTeam {
-                        TeamScoreboard(team: myTeam, alignment: .leading)
+                        TeamScoreboard(team: myTeam)
                     }
 
                     Text("vs")
@@ -31,7 +31,7 @@ struct MatchupDetailView: View {
                         .padding(.top, 32)
 
                     if let opponent {
-                        TeamScoreboard(team: opponent, alignment: .trailing)
+                        TeamScoreboard(team: opponent)
                     }
                 }
                 .padding(.vertical, 6)
@@ -60,34 +60,31 @@ struct MatchupDetailView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Week \(week.week)")
+        .navigationTitle(week.leagueName)
         .navigationBarTitleDisplayMode(.inline)
     }
 
     /// Both teams' players in parallel columns so you can read the matchup across
-    /// the screen instead of scrolling two stacked lists.
+    /// the screen instead of scrolling two stacked lists. Both columns are
+    /// left-aligned so the numbers line up.
     private func sideBySide(_ players: (TeamScore) -> [RosterPlayer]) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            playerColumn(team: myTeam, players: players, trailing: false)
+            playerColumn(team: myTeam, players: players)
             Divider()
-            playerColumn(team: opponent, players: players, trailing: true)
+            playerColumn(team: opponent, players: players)
         }
     }
 
     @ViewBuilder
-    private func playerColumn(
-        team: TeamScore?,
-        players: (TeamScore) -> [RosterPlayer],
-        trailing: Bool
-    ) -> some View {
-        VStack(alignment: trailing ? .trailing : .leading, spacing: 6) {
+    private func playerColumn(team: TeamScore?, players: (TeamScore) -> [RosterPlayer]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             if let team {
                 ForEach(players(team)) { player in
-                    PlayerCell(player: player, trailing: trailing)
+                    PlayerCell(player: player)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -95,19 +92,17 @@ struct MatchupDetailView: View {
 /// with position/team underneath so the row stays one line tall on a phone.
 private struct PlayerCell: View {
     let player: RosterPlayer
-    let trailing: Bool
 
     var body: some View {
-        VStack(alignment: trailing ? .trailing : .leading, spacing: 1) {
+        VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 4) {
-                if trailing {
-                    points
-                    name
-                } else {
-                    name
-                    Spacer(minLength: 2)
-                    points
-                }
+                Text(player.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Text(player.pointsText)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(player.isLive ? Color.green : Color.primary)
             }
 
             Text(player.infoText)
@@ -116,17 +111,5 @@ private struct PlayerCell: View {
                 .lineLimit(1)
         }
         .opacity(player.isBench ? 0.6 : 1)
-    }
-
-    private var name: some View {
-        Text(player.name)
-            .font(.caption.weight(.medium))
-            .lineLimit(1)
-    }
-
-    private var points: some View {
-        Text(player.pointsText)
-            .font(.caption.monospacedDigit().weight(.semibold))
-            .foregroundStyle(player.isLive ? Color.green : Color.primary)
     }
 }
