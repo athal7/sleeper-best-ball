@@ -139,19 +139,26 @@ private struct MatchupSide: View {
             Text("proj \(team.projected.scoreText)")
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)
+
+            Text(team.playedCounts)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
+/// Lineup slot label, used between the two teams' players in the matchup view.
 struct SlotBadge: View {
     let slot: String
 
     var body: some View {
         Text(shortLabel)
-            .font(.system(.caption2, design: .monospaced).weight(.bold))
-            .foregroundStyle(.secondary)
-            .frame(width: 48, alignment: .leading)
+            .font(.system(size: 9, design: .monospaced).weight(.bold))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
     }
 
     private var shortLabel: String {
@@ -160,46 +167,11 @@ struct SlotBadge: View {
     }
 }
 
-struct PlayerRow: View {
-    let player: RosterPlayer
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            SlotBadge(slot: player.slot)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(player.name)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                Text(player.infoText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(player.statusText)
-                    .font(.caption2)
-                    .foregroundStyle(statusColor)
-            }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(player.pointsText)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                Text(player.projectionText)
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .opacity(player.isBench ? 0.6 : 1)
-        .padding(.vertical, 1)
-    }
-
-    private var statusColor: Color {
-        if player.bye { return .orange }
-        if player.isLive { return .green }
-        if player.isFinal { return .secondary }
-        return .secondary
-    }
-}
-
+/// Team header for the matchup detail: identity, score, projection, then the
+/// `@username · #rank (record)` line and who has played, as in Streamlit.
 struct TeamScoreboard: View {
     let team: TeamScore
+    var isUser: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -212,7 +184,8 @@ struct TeamScoreboard: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(team.points.scoreText)
-                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(isUser ? Color.accentColor : Color.primary)
                 Text("pts")
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -222,9 +195,10 @@ struct TeamScoreboard: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Text("\(team.record) · #\(team.rank)")
+            Text(teamInfo)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .lineLimit(1)
 
             Text(team.playedCounts)
                 .font(.caption2)
@@ -232,5 +206,10 @@ struct TeamScoreboard: View {
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var teamInfo: String {
+        let user = team.username.isEmpty ? team.name : "@\(team.username)"
+        return "\(user) · #\(team.rank) (\(team.record))"
     }
 }

@@ -229,16 +229,31 @@ struct WaiversView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
-    private var groups: [(leagueID: String, leagueName: String, picks: [WaiverPick])] {
+    /// Grouped the way the Streamlit waiver guide reads: per league, then per
+    /// player you'd drop, with the adds that player would make room for under it.
+    private var leagues: [LeagueWaivers] {
         var order: [String] = []
-        var byLeague: [String: [WaiverPick]] = [:]
+        var names: [String: String] = [:]
+        var byDrop: [String: [String: [WaiverPick]]] = [:]
         for pick in model.waivers {
-            if byLeague[pick.leagueID] == nil { order.append(pick.leagueID) }
-            byLeague[pick.leagueID, default: []].append(pick)
+            if names[pick.leagueID] == nil {
+                order.append(pick.leagueID)
+                names[pick.leagueID] = pick.leagueName
+            }
+            byDrop[pick.leagueID, default: [:]][pick.dropID, default: []].append(pick)
         }
         return order.compactMap { leagueID in
-            guard let picks = byLeague[leagueID], let first = picks.first else { return nil }
-            return (leagueID, first.leagueName, picks)
+            guard let drops = byDrop[leagueID] else { return nil }
+            let groups = drops.compactMap { dropID, picks -> DropGroup? in
+                guard let first = picks.first else { return nil }
+                return DropGroup(id: dropID, drop: first, adds: picks)
+            }
+            .sorted { lhs, rhs in
+                let left = lhs.adds.map(\.uplift).max() ?? 0
+                let right = rhs.adds.map(\.uplift).max() ?? 0
+                return left > right
+            }
+            return LeagueWaivers(id: leagueID, name: names[leagueID] ?? "", drops: groups)
         }
     }
 
@@ -262,10 +277,13 @@ struct WaiversView: View {
                         }
                     }
                 } else {
-                    ForEach(groups, id: \.leagueID) { group in
-                        Section(group.leagueName) {
-                            ForEach(group.picks) { pick in
-                                WaiverRow(pick: pick)
+                    ForEach(leagues) { league in
+                        Section(league.name) {
+                            ForEach(league.drops) { group in
+                                DropHeaderRow(pick: group.drop)
+                                ForEach(group.adds) { pick in
+                                    WaiverRow(pick: pick)
+                                }
                             }
                         }
                     }
@@ -294,29 +312,76 @@ struct WaiversView: View {
     }
 }
 
+private struct LeagueWaivers: Identifiable {
+    let id: String
+    let name: String
+    let drops: [DropGroup]
+}
+
+private struct DropGroup: Identifiable {
+    let id: String
+    let drop: WaiverPick
+    let adds: [WaiverPick]
+}
+
+/// Heading for the player a group of adds would replace, matching the `− Name`
+/// row the Streamlit waiver guide puts above each block.
+private struct DropHeaderRow: View {
+    let pick: WaiverPick
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "minus.circle.fill")
+                .font(.caption2)
+                .foregroundStyle(.red)
+
+            Text("Drop \(pick.dropName)")
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            Text("\(pick.dropPosition) · \(pick.dropTeam)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .listRowBackground(Color(uiColor: .secondarySystemGroupedBackground).opacity(0.5))
+        .padding(.top, 4)
+    }
+}
+
 private struct WaiverRow: View {
     let pick: WaiverPick
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("Add \(pick.addName)")
-                    .font(.subheadline.weight(.semibold))
-                Spacer(minLength: 8)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+
+                Text(pick.addName)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(1)
+
+                Spacer(minLength: 6)
+
                 if pick.isUpgrade {
                     Text("+\(String(format: "%.1f", pick.uplift))")
                         .font(.subheadline.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.green)
                 } else {
                     Text("best available")
-                        .font(.caption.weight(.medium))
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
             }
-            Text("\(pick.addPosition) · \(pick.addTeam)  ·  drop \(pick.dropName) (\(pick.dropPosition))")
-                .font(.caption)
+            Text("\(pick.addPosition) · \(pick.addTeam)")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
+                .padding(.leading, 16)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 1)
     }
 }
