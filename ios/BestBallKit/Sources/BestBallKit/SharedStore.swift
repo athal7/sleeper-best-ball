@@ -70,6 +70,7 @@ public enum SharedStore {
     private static let configKey = "bestball.savedLeague"
     private static let accountKey = "bestball.accountUsername"
     private static let snapshotKey = "bestball.widgetSnapshot"
+    private static let trackedWeekKey = "bestball.trackedWeek"
     private static let playersFileName = "players.json"
 
     /// Falls back to this process's own defaults when the App Group isn't
@@ -131,6 +132,19 @@ public enum SharedStore {
     public static func loadSnapshot() -> WidgetSnapshot? {
         guard let data = defaults.data(forKey: snapshotKey) else { return nil }
         return try? JSONDecoder().decode(WidgetSnapshot.self, from: data)
+    }
+
+    // MARK: Live Activity week
+
+    /// Background refresh reloads the week the Live Activities are actually
+    /// showing, so it doesn't jump them to another week behind your back.
+    public static func saveTrackedWeek(_ week: Int) {
+        defaults.set(week, forKey: trackedWeekKey)
+    }
+
+    public static func loadTrackedWeek() -> Int? {
+        let value = defaults.integer(forKey: trackedWeekKey)
+        return value > 0 ? value : nil
     }
 
     // MARK: Player directory cache

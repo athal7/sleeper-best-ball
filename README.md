@@ -28,7 +28,9 @@ To let the widget share the selected league, join the paid Developer Program and
 
 `BB_BUNDLE_ID` is a project build setting (default `com.sleeperbestball.app`); change it if that identifier is already taken, since free teams can only sign identifiers nobody else has claimed.
 
-The app starts a Live Activity for the current week's matchup in **every in-season league** when you open it, each showing both sides' live and projected points on the Lock Screen and in the Dynamic Island. They update every time the app refreshes (no push server involved), and the bolt button in the toolbar stops all of them until you turn them back on. iOS only keeps a handful of Live Activities alive at once, so tracking is capped at the first five in-season leagues. Live Activities need no App Group, so they work on a free team.
+The app starts a Live Activity for the current week's matchup in **every in-season league** when you open it, each showing both sides' live and projected points on the Lock Screen and in the Dynamic Island. They keep updating while the app is closed: a `BGAppRefreshTask` wakes the app in the background, reloads the tracked week, and pushes the new scores into each activity. iOS schedules that wake-up on its own schedule (roughly every 15 minutes at best, less often if the app is rarely used, and never after you force-quit it), so treat the scores as behind by minutes rather than seconds. True second-by-second updates need APNs push, which requires a paid membership and a server.
+
+The labelled toggle at the bottom of the scores screen stops all of them until you turn them back on. iOS only keeps a handful of Live Activities alive at once, so tracking is capped at the first five in-season leagues. Live Activities need no App Group, so they work on a free team.
 
 There's no league to pick: the scores screen shows every league you're in for the selected week, grouped by league, with the week arrows at the top. Your Sleeper username is remembered at the account level, so the leagues load as soon as the app opens.
 

@@ -413,6 +413,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BestBall/Info.plist;
 				INFOPLIST_KEY_BBAppGroup = "group.$(BB_BUNDLE_ID)";
 				INFOPLIST_KEY_CFBundleDisplayName = "Best Ball";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
@@ -444,6 +445,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BestBall/Info.plist;
 				INFOPLIST_KEY_BBAppGroup = "group.$(BB_BUNDLE_ID)";
 				INFOPLIST_KEY_CFBundleDisplayName = "Best Ball";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.sports";
