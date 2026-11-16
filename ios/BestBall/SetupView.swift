@@ -13,6 +13,9 @@ struct SetupView: View {
                         .autocorrectionDisabled()
                         .submitLabel(.search)
                         .onSubmit { Task { await model.connect() } }
+                        .onChange(of: model.username) { _, value in
+                            model.usernameEdited(value)
+                        }
                 } header: {
                     Text("Your Sleeper account")
                 } footer: {

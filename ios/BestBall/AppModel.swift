@@ -83,6 +83,14 @@ final class AppModel: ObservableObject {
         // Come back to the week the Live Activities are showing rather than
         // jumping to Sleeper's current week.
         await loadAll(week: SharedStore.loadTrackedWeek() ?? state?.defaultWeek ?? 1)
+
+        // A remembered name that no longer loads shouldn't strand the user on an
+        // empty scores screen: show setup with the name still filled in.
+        if leagueWeeks.isEmpty, let error = errorMessage {
+            isConnected = false
+            setupError = error
+            errorMessage = nil
+        }
     }
 
     // MARK: Setup
@@ -103,18 +111,29 @@ final class AppModel: ObservableObject {
         await loadAll(week: state?.defaultWeek ?? SharedStore.loadTrackedWeek() ?? 1)
 
         if let error = errorMessage, leagueWeeks.isEmpty {
-            // Connecting failed outright: stay on setup so the user can fix the name.
-            SharedStore.clearUsername()
+            // Connecting failed outright: stay on setup so the user can fix the
+            // name. The name itself is kept — retyping it is the annoyance.
             isConnected = false
             setupError = error
             errorMessage = nil
         }
     }
 
-    func signOut() {
-        SharedStore.clearUsername()
+    /// Called as the setup field changes, so the name is remembered as soon as
+    /// it's valid and forgotten only once it's actually empty.
+    func usernameEdited(_ value: String) {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.isEmpty {
+            SharedStore.clearUsername()
+        } else {
+            SharedStore.saveUsername(name)
+        }
+    }
+
+    /// Backs out to the setup screen without forgetting who you are: the username
+    /// stays saved and filled in, so coming back is one tap.
+    func disconnect() {
         SharedStore.clearConfig()
-        username = ""
         account = nil
         leagues = []
         leagueWeeks = []

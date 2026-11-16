@@ -43,7 +43,7 @@ struct MatchupsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        model.signOut()
+                        model.disconnect()
                     } label: {
                         Label("Change account", systemImage: "person.crop.circle")
                     }
