@@ -105,10 +105,17 @@ private struct PlayerCell: View {
                     .foregroundStyle(player.isLive ? Color.green : Color.primary)
             }
 
-            Text(player.infoText)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            HStack(spacing: 4) {
+                Text(player.slot)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(minWidth: 22, alignment: .leading)
+                Text(player.infoText)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .opacity(player.isBench ? 0.6 : 1)
     }
