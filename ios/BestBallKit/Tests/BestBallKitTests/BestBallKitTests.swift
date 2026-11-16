@@ -325,3 +325,62 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         record: "4-1", rank: rosterID, points: 88.1, projected: projected, players: []
     )
 }
+
+@Suite struct WaiverTests {
+    private let slots = LineupSlots.slots(for: ["QB", "RB", "RB", "WR", "FLEX", "BN"])
+
+    @Test func lineupTotalFillsBestEligiblePlayerPerSlot() {
+        let scanner = WaiverScanner()
+        let positions = ["qb": "QB", "rb1": "RB", "rb2": "RB", "wr": "WR", "te": "TE"]
+        let points = ["qb": 20.0, "rb1": 15.0, "rb2": 12.0, "wr": 18.0, "te": 9.0]
+        // QB takes the quarterback, both RBs take the backs, WR takes the receiver,
+        // and FLEX takes whatever startable player is left over: the tight end.
+        expectClose(scanner.lineupTotal(points, positions, slots), 20 + 15 + 12 + 18 + 9)
+    }
+
+    @Test func lineupTotalRewardsUpgradingTheWeakestStarter() {
+        let scanner = WaiverScanner()
+        let positions = ["qb": "QB", "rb1": "RB", "rb2": "RB"]
+        let before = ["qb": 20.0, "rb1": 15.0, "rb2": 8.0]
+        var after = before
+        after["rb3"] = 14.0
+        var afterPositions = positions
+        afterPositions["rb3"] = "RB"
+        let upgrade = scanner.lineupTotal(after, afterPositions, slots)
+            - scanner.lineupTotal(before, positions, slots)
+        // The 14-point back starts over the 8-point one, and the displaced back
+        // slides into FLEX, so the whole gain counts.
+        expectClose(upgrade, 14)
+    }
+
+    @Test func lineupTotalIgnoresBenchSlots() {
+        let scanner = WaiverScanner()
+        let benchOnly = LineupSlots.slots(for: ["BN"])
+        let points = ["a": 30.0, "b": 20.0]
+        let positions = ["a": "RB", "b": "WR"]
+        expectClose(scanner.lineupTotal(points, positions, benchOnly), 0)
+    }
+
+    @Test(arguments: [
+        (15, 4, 0, 16),
+        (15, 6, 0, 17),
+        (15, 6, 1, 18),
+        (15, 4, 2, 18),
+    ])
+    func seasonEndWeekIncludesTheChampionship(start: Int, teams: Int, roundType: Int, expected: Int) {
+        // Same cases as tests/test_waiver.py.
+        let settings = SleeperLeague.Settings(
+            playoffWeekStart: start, playoffTeams: teams,
+            playoffRoundType: roundType, numTeams: 12, bestBall: nil
+        )
+        #expect(WaiverScanner.seasonEndWeek(settings) == expected)
+    }
+
+    @Test func seasonEndWeekDefaultsToTheFullSeason() {
+        let noPlayoffs = SleeperLeague.Settings(
+            playoffWeekStart: 0, playoffTeams: 0, playoffRoundType: 0,
+            numTeams: 12, bestBall: nil
+        )
+        #expect(WaiverScanner.seasonEndWeek(noPlayoffs) == 18)
+    }
+}

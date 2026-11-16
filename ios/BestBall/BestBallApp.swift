@@ -74,6 +74,7 @@ enum BackgroundRefresh {
         let work = Task { @MainActor in
             let model = AppModel()
             await model.start()
+            // start() also scans waivers, which is what posts the notification.
             return model.errorMessage == nil
         }
         task.expirationHandler = { work.cancel() }

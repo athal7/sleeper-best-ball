@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import UserNotifications
 import BestBallKit
 #if canImport(WidgetKit)
 import WidgetKit
@@ -25,8 +26,20 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var isTrackingLiveActivity = LiveActivityController.shared.isTracking
 
+    /// Add/drop suggestions across every league, best first.
+    @Published private(set) var waivers: [WaiverPick] = []
+    /// Suggestions you haven't opened the Waivers screen for yet.
+    @Published private(set) var unseenWaiverCount = 0
+    @Published private(set) var isScanningWaivers = false
+    /// Leagues where Sleeper actually lets you add and drop players.
+    @Published private(set) var waiverEligibleLeagues = 0
+    /// Best-ball leagues, which have no wire at all.
+    @Published private(set) var bestBallLeagues = 0
+
     private let loader = ScoresLoader()
     private let service = BestBallService()
+    private let waiverScanner = WaiverScanner()
+    private var lastWaiverScan: Date?
     private let liveActivities = LiveActivityController.shared
     private var account: SleeperAccount?
     private var hasStarted = false
@@ -62,6 +75,7 @@ final class AppModel: ObservableObject {
         guard !hasStarted else { return }
         hasStarted = true
         state = try? await service.sportState()
+        restoreWaivers()
 
         guard let saved = SharedStore.loadUsername() else {
             username = SharedStore.loadConfig()?.username ?? ""
@@ -69,6 +83,7 @@ final class AppModel: ObservableObject {
         }
         username = saved
         isConnected = true
+        await WaiverNotifier.requestAuthorization()
         // Come back to the week the Live Activities are showing rather than
         // jumping to Sleeper's current week.
         await loadAll(week: SharedStore.loadTrackedWeek() ?? state?.defaultWeek ?? 1)
@@ -110,6 +125,10 @@ final class AppModel: ObservableObject {
         errorMessage = nil
         isConnected = false
         isTrackingLiveActivity = false
+        waivers = []
+        unseenWaiverCount = 0
+        waiverEligibleLeagues = 0
+        bestBallLeagues = 0
         BackgroundRefresh.cancel()
         Task { await liveActivities.end() }
     }
@@ -185,6 +204,73 @@ final class AppModel: ObservableObject {
 
         await syncLiveActivities(from: leagueWeeks)
         if isTrackingLiveActivity { BackgroundRefresh.schedule() }
+
+        if needsWaiverScan {
+            await refreshWaivers(notify: true)
+        }
+    }
+
+    // MARK: Waivers
+
+    /// The week waiver values start from: Sleeper's current one, not whichever
+    /// week you happen to be browsing.
+    var waiverWeek: Int { state?.defaultWeek ?? week }
+
+    /// Recomputed on a half-hour cadence, so pull-to-refresh isn't re-downloading
+    /// the rest of the season's projections every time.
+    private var needsWaiverScan: Bool {
+        guard let lastWaiverScan else { return true }
+        if SharedStore.loadWaiverReport()?.week != waiverWeek { return true }
+        return Date().timeIntervalSince(lastWaiverScan) > 30 * 60
+    }
+
+    private func restoreWaivers() {
+        guard let report = SharedStore.loadWaiverReport() else { return }
+        waivers = report.picks
+        waiverEligibleLeagues = report.eligibleLeagues
+        bestBallLeagues = report.bestBallLeagues
+        let seen = SharedStore.seenWaiverIDs()
+        unseenWaiverCount = report.picks.filter { !seen.contains($0.id) }.count
+    }
+
+    func refreshWaivers(notify: Bool) async {
+        guard isConnected, let account, !leagues.isEmpty else { return }
+        isScanningWaivers = true
+        defer { isScanningWaivers = false }
+
+        let targetWeek = waiverWeek
+        let scan = await waiverScanner.scan(
+            leagues: leagues,
+            userID: account.userID,
+            week: targetWeek,
+            season: currentSeason
+        )
+        lastWaiverScan = Date()
+        waivers = scan.picks
+        waiverEligibleLeagues = scan.eligibleLeagues
+        bestBallLeagues = scan.bestBallLeagues
+        SharedStore.saveWaiverReport(
+            WaiverReport(
+                week: targetWeek,
+                generated: Date(),
+                picks: scan.picks,
+                eligibleLeagues: scan.eligibleLeagues,
+                bestBallLeagues: scan.bestBallLeagues
+            )
+        )
+        let seen = SharedStore.seenWaiverIDs()
+        unseenWaiverCount = scan.picks.filter { !seen.contains($0.id) }.count
+
+        if notify {
+            await WaiverNotifier.announce(scan.picks)
+        }
+    }
+
+    /// Opening the Waivers screen clears the badge and stops repeats about the
+    /// same players.
+    func markWaiversSeen() {
+        SharedStore.markWaiversSeen(waivers.map(\.id))
+        unseenWaiverCount = 0
     }
 
     func refresh() async {
@@ -210,5 +296,46 @@ final class AppModel: ObservableObject {
             return description
         }
         return error.localizedDescription
+    }
+}
+
+/// Local notifications for waiver suggestions. Local (not push) means this works
+/// on a free Apple ID, and means the text has to be built when the app wakes up.
+enum WaiverNotifier {
+    static let threadIdentifier = "bestball.waivers"
+
+    static func requestAuthorization() async {
+        let center = UNUserNotificationCenter.current()
+        guard await center.notificationSettings().authorizationStatus == .notDetermined else { return }
+        _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+    }
+
+    /// Announces only picks that have never been announced before, so waking up
+    /// hourly with the same three adds stays quiet.
+    static func announce(_ picks: [WaiverPick]) async {
+        guard !picks.isEmpty else { return }
+        let already = SharedStore.notifiedWaiverIDs()
+        let fresh = picks.filter { !already.contains($0.id) }
+        guard !fresh.isEmpty, let top = fresh.max(by: { $0.uplift < $1.uplift }) else { return }
+
+        let center = UNUserNotificationCenter.current()
+        let status = await center.notificationSettings().authorizationStatus
+        guard status == .authorized || status == .provisional else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = fresh.count == 1
+            ? "Waiver suggestion: \(top.addName)"
+            : "\(fresh.count) waiver suggestions"
+        content.body = "\(top.leagueName): add \(top.addName) (\(top.addPosition)) for \(top.dropName), +\(String(format: "%.1f", top.uplift)) projected."
+        content.sound = .default
+        content.threadIdentifier = threadIdentifier
+
+        let request = UNNotificationRequest(
+            identifier: "waiver-\(top.id)-\(Int(Date().timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+        guard (try? await center.add(request)) != nil else { return }
+        SharedStore.markWaiversNotified(fresh.map(\.id))
     }
 }

@@ -111,12 +111,17 @@ public struct SleeperLeague: Decodable, Sendable {
     public struct Settings: Decodable, Sendable {
         public let playoffWeekStart: Int?
         public let playoffTeams: Int?
+        public let playoffRoundType: Int?
         public let numTeams: Int?
+        /// 1 for best-ball leagues, which don't allow adds, drops, or trades.
+        public let bestBall: Int?
 
         enum CodingKeys: String, CodingKey {
             case playoffWeekStart = "playoff_week_start"
             case playoffTeams = "playoff_teams"
+            case playoffRoundType = "playoff_round_type"
             case numTeams = "num_teams"
+            case bestBall = "best_ball"
         }
     }
 
@@ -143,7 +148,9 @@ public struct SleeperLeague: Decodable, Sendable {
         status = (try? container.decode(String.self, forKey: .status)) ?? ""
         scoringSettings = (try? container.decode([String: Double].self, forKey: .scoringSettings)) ?? [:]
         rosterPositions = (try? container.decode([String].self, forKey: .rosterPositions)) ?? []
-        settings = (try? container.decode(Settings.self, forKey: .settings)) ?? Settings(playoffWeekStart: nil, playoffTeams: nil, numTeams: nil)
+        settings = (try? container.decode(Settings.self, forKey: .settings))
+            ?? Settings(playoffWeekStart: nil, playoffTeams: nil, playoffRoundType: nil,
+                        numTeams: nil, bestBall: nil)
     }
 }
 

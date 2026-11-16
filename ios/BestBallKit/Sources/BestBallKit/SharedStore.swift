@@ -71,7 +71,12 @@ public enum SharedStore {
     private static let accountKey = "bestball.accountUsername"
     private static let snapshotKey = "bestball.widgetSnapshot"
     private static let trackedWeekKey = "bestball.trackedWeek"
+    private static let waiverReportKey = "bestball.waiverReport"
+    private static let waiversNotifiedKey = "bestball.waiversNotified"
+    private static let waiversSeenKey = "bestball.waiversSeen"
     private static let playersFileName = "players.json"
+    /// Keeps the remembered ID lists from growing without bound.
+    private static let rememberedLimit = 500
 
     /// Falls back to this process's own defaults when the App Group isn't
     /// available (free Apple ID signing can't use App Groups). The app keeps
@@ -145,6 +150,71 @@ public enum SharedStore {
     public static func loadTrackedWeek() -> Int? {
         let value = defaults.integer(forKey: trackedWeekKey)
         return value > 0 ? value : nil
+    }
+
+    // MARK: Waivers
+
+    public static func saveWaiverReport(_ report: WaiverReport) {
+        defaults.set(try? JSONEncoder().encode(report), forKey: waiverReportKey)
+    }
+
+    public static func loadWaiverReport() -> WaiverReport? {
+        guard let data = defaults.data(forKey: waiverReportKey) else { return nil }
+        return try? JSONDecoder().decode(WaiverReport.self, from: data)
+    }
+
+    /// Waiver picks already announced in a notification, so a wake-up that finds
+    /// the same adds doesn't buzz the phone again.
+    public static func notifiedWaiverIDs() -> Set<String> {
+        Set(defaults.stringArray(forKey: waiversNotifiedKey) ?? [])
+    }
+
+    public static func markWaiversNotified(_ ids: [String]) {
+        remember(ids, key: waiversNotifiedKey)
+    }
+
+    /// Waiver picks the Waivers screen has shown, so its badge means "new to you".
+    public static func seenWaiverIDs() -> Set<String> {
+        Set(defaults.stringArray(forKey: waiversSeenKey) ?? [])
+    }
+
+    public static func markWaiversSeen(_ ids: [String]) {
+        remember(ids, key: waiversSeenKey)
+    }
+
+    private static func remember(_ ids: [String], key: String) {
+        var list = defaults.stringArray(forKey: key) ?? []
+        var known = Set(list)
+        for id in ids where known.insert(id).inserted {
+            list.append(id)
+        }
+        if list.count > rememberedLimit {
+            list.removeFirst(list.count - rememberedLimit)
+        }
+        defaults.set(list, forKey: key)
+    }
+
+    // MARK: Weekly projections
+
+    public static func loadProjections(season: Int, week: Int, maxAge: TimeInterval) -> StatTable? {
+        guard let url = cacheURL(projectionsFileName(season: season, week: week)),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let modified = attributes[.modificationDate] as? Date,
+              Date().timeIntervalSince(modified) < maxAge,
+              let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(StatTable.self, from: data)
+    }
+
+    public static func saveProjections(_ table: StatTable, season: Int, week: Int) {
+        guard let url = cacheURL(projectionsFileName(season: season, week: week)),
+              let data = try? JSONEncoder().encode(table) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private static func projectionsFileName(season: Int, week: Int) -> String {
+        "projections-\(season)-\(week).json"
     }
 
     // MARK: Player directory cache

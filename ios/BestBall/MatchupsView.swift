@@ -3,6 +3,7 @@ import BestBallKit
 
 struct MatchupsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showingWaivers = false
 
     var body: some View {
         NavigationStack {
@@ -47,8 +48,32 @@ struct MatchupsView: View {
                         Label("Change account", systemImage: "person.crop.circle")
                     }
                 }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingWaivers = true
+                    } label: {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .overlay(alignment: .topTrailing) {
+                                if model.unseenWaiverCount > 0 {
+                                    Text("\(model.unseenWaiverCount)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 4)
+                                        .frame(minWidth: 14, minHeight: 14)
+                                        .background(Color.red, in: Capsule())
+                                        .offset(x: 8, y: -6)
+                                }
+                            }
+                    }
+                    .accessibilityLabel("Waiver suggestions")
+                }
             }
             .refreshable { await model.refresh() }
+            .sheet(isPresented: $showingWaivers) {
+                WaiversView()
+                    .environmentObject(model)
+            }
             .overlay {
                 if model.isLoading, !model.leagueWeeks.isEmpty {
                     ProgressView()
@@ -193,5 +218,105 @@ struct MatchupsView: View {
             }
             .padding(.vertical, 4)
         }
+    }
+}
+
+// MARK: - Waivers
+
+/// Add/drop suggestions, one section per league. Lives here rather than in its
+/// own file so the hand-written project file doesn't need another entry.
+struct WaiversView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    private var groups: [(leagueID: String, leagueName: String, picks: [WaiverPick])] {
+        var order: [String] = []
+        var byLeague: [String: [WaiverPick]] = [:]
+        for pick in model.waivers {
+            if byLeague[pick.leagueID] == nil { order.append(pick.leagueID) }
+            byLeague[pick.leagueID, default: []].append(pick)
+        }
+        return order.compactMap { leagueID in
+            guard let picks = byLeague[leagueID], let first = picks.first else { return nil }
+            return (leagueID, first.leagueName, picks)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if model.waivers.isEmpty {
+                    Section {
+                        if model.isScanningWaivers {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                Text("Scoring free agents…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else if model.waiverEligibleLeagues == 0, model.bestBallLeagues > 0 {
+                            ContentUnavailableView(
+                                "Best-ball leagues have no wire",
+                                systemImage: "lock",
+                                description: Text("All \(model.bestBallLeagues) of your leagues are best ball: Sleeper locks rosters after the draft, so there are no adds, drops, or trades to recommend. This screen fills in for any league that allows moves.")
+                            )
+                        } else {
+                            ContentUnavailableView(
+                                "No adds worth making",
+                                systemImage: "checkmark.seal",
+                                description: Text("Nothing on the wire improves your lineup by a point or more. That's usually good news.")
+                            )
+                        }
+                    }
+                } else {
+                    ForEach(groups, id: \.leagueID) { group in
+                        Section(group.leagueName) {
+                            ForEach(group.picks) { pick in
+                                WaiverRow(pick: pick)
+                            }
+                        }
+                    }
+
+                    Section {
+                        Button {
+                            Task { await model.refreshWaivers(notify: false) }
+                        } label: {
+                            Label("Rescan", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(model.isScanningWaivers)
+                    } footer: {
+                        Text("Projected points gained over the rest of the season, playoff weeks counted 1.5×. It's an estimate: it ignores injuries, bidding wars, and who else wants the same player.")
+                    }
+                }
+            }
+            .navigationTitle("Waivers")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { model.markWaiversSeen() }
+        }
+    }
+}
+
+private struct WaiverRow: View {
+    let pick: WaiverPick
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Add \(pick.addName)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 8)
+                Text("+\(String(format: "%.1f", pick.uplift))")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.green)
+            }
+            Text("\(pick.addPosition) · \(pick.addTeam)  ·  drop \(pick.dropName) (\(pick.dropPosition))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 2)
     }
 }
