@@ -15,15 +15,19 @@ public struct WaiverPick: Codable, Hashable, Identifiable, Sendable {
     public let dropPosition: String
     public let dropTeam: String
     /// Projected points gained over the rest of the season, playoff weeks
-    /// counted 1.5x. Negative values never make it into a report.
+    /// counted 1.5x. Zero or below means the add wouldn't crack your lineup.
     public let uplift: Double
+    /// False for a "best available" filler: the wire is thin enough that no add
+    /// improves your projected lineup, so this is simply the best name on it.
+    public let isUpgrade: Bool
 
     /// Stable identity for "have I already been told about this one?".
     public var id: String { "\(leagueID)|\(addID)|\(dropID)" }
 
     public init(leagueID: String, leagueName: String, addID: String, addName: String,
                 addPosition: String, addTeam: String, dropID: String, dropName: String,
-                dropPosition: String, dropTeam: String, uplift: Double) {
+                dropPosition: String, dropTeam: String, uplift: Double,
+                isUpgrade: Bool = true) {
         self.leagueID = leagueID
         self.leagueName = leagueName
         self.addID = addID
@@ -35,6 +39,23 @@ public struct WaiverPick: Codable, Hashable, Identifiable, Sendable {
         self.dropPosition = dropPosition
         self.dropTeam = dropTeam
         self.uplift = uplift
+        self.isUpgrade = isUpgrade
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        leagueID = try container.decode(String.self, forKey: .leagueID)
+        leagueName = (try? container.decode(String.self, forKey: .leagueName)) ?? ""
+        addID = try container.decode(String.self, forKey: .addID)
+        addName = (try? container.decode(String.self, forKey: .addName)) ?? addID
+        addPosition = (try? container.decode(String.self, forKey: .addPosition)) ?? ""
+        addTeam = (try? container.decode(String.self, forKey: .addTeam)) ?? ""
+        dropID = try container.decode(String.self, forKey: .dropID)
+        dropName = (try? container.decode(String.self, forKey: .dropName)) ?? dropID
+        dropPosition = (try? container.decode(String.self, forKey: .dropPosition)) ?? ""
+        dropTeam = (try? container.decode(String.self, forKey: .dropTeam)) ?? ""
+        uplift = (try? container.decode(Double.self, forKey: .uplift)) ?? 0
+        isUpgrade = (try? container.decode(Bool.self, forKey: .isUpgrade)) ?? (uplift > 0)
     }
 }
 
@@ -43,44 +64,12 @@ public struct WaiverReport: Codable, Equatable, Sendable {
     public let week: Int
     public let generated: Date
     public let picks: [WaiverPick]
-    /// Leagues where moves are legal and were actually scored.
-    public let eligibleLeagues: Int
-    /// Best-ball leagues, which have no wire to work: adds, drops and trades are
-    /// all disabled by Sleeper.
-    public let bestBallLeagues: Int
 
-    public init(week: Int, generated: Date, picks: [WaiverPick],
-                eligibleLeagues: Int = 0, bestBallLeagues: Int = 0) {
+    public init(week: Int, generated: Date, picks: [WaiverPick]) {
         self.week = week
         self.generated = generated
         self.picks = picks
-        self.eligibleLeagues = eligibleLeagues
-        self.bestBallLeagues = bestBallLeagues
     }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        week = (try? container.decode(Int.self, forKey: .week)) ?? 0
-        generated = (try? container.decode(Date.self, forKey: .generated)) ?? Date()
-        picks = (try? container.decode([WaiverPick].self, forKey: .picks)) ?? []
-        eligibleLeagues = (try? container.decode(Int.self, forKey: .eligibleLeagues)) ?? 0
-        bestBallLeagues = (try? container.decode(Int.self, forKey: .bestBallLeagues)) ?? 0
-    }
-}
-
-/// What one scan found, plus enough context for the screen to explain itself.
-public struct WaiverScan: Sendable {
-    public let picks: [WaiverPick]
-    public let eligibleLeagues: Int
-    public let bestBallLeagues: Int
-
-    public init(picks: [WaiverPick], eligibleLeagues: Int, bestBallLeagues: Int) {
-        self.picks = picks
-        self.eligibleLeagues = eligibleLeagues
-        self.bestBallLeagues = bestBallLeagues
-    }
-
-    public static let empty = WaiverScan(picks: [], eligibleLeagues: 0, bestBallLeagues: 0)
 }
 
 // MARK: - Scanner
@@ -97,7 +86,7 @@ public struct WaiverScanner: Sendable {
         /// Suggestions have to be worth at least this many points to be shown.
         public var minUplift: Double
 
-        public init(picksPerLeague: Int = 3, candidateLimit: Int = 25, minUplift: Double = 1) {
+        public init(picksPerLeague: Int = 3, candidateLimit: Int = 40, minUplift: Double = 0) {
             self.picksPerLeague = picksPerLeague
             self.candidateLimit = candidateLimit
             self.minUplift = minUplift
@@ -119,10 +108,10 @@ public struct WaiverScanner: Sendable {
         self.cacheAge = cacheAge
     }
 
-    /// Scans every league that allows moves, returning the best suggestions
-    /// across all of them, best first.
-    public func scan(leagues: [LeagueSummary], userID: String, week: Int, season: Int) async -> WaiverScan {
-        guard !leagues.isEmpty else { return .empty }
+    /// Scans every league in parallel, returning the best suggestions across all
+    /// of them, best first.
+    public func scan(leagues: [LeagueSummary], userID: String, week: Int, season: Int) async -> [WaiverPick] {
+        guard !leagues.isEmpty else { return [] }
 
         let details = await withTaskGroup(of: (String, SleeperLeague?).self) { group in
             for league in leagues {
@@ -134,30 +123,18 @@ public struct WaiverScanner: Sendable {
             }
             return found
         }
-        guard !details.isEmpty else { return .empty }
+        guard !details.isEmpty else { return [] }
 
-        // Best-ball leagues have no add/drop and no trades, so scoring their wire
-        // would only invent moves Sleeper won't let you make.
-        let movable = leagues.filter { details[$0.leagueID]?.settings.bestBall != 1 }
-        let bestBallLeagues = leagues.count - movable.count
-        guard !movable.isEmpty else {
-            return WaiverScan(picks: [], eligibleLeagues: 0, bestBallLeagues: bestBallLeagues)
-        }
-
-        let endWeek = movable.compactMap { details[$0.leagueID].map { Self.seasonEndWeek($0.settings) } }
+        let endWeek = leagues.compactMap { details[$0.leagueID].map { Self.seasonEndWeek($0.settings) } }
             .reduce(18) { min(18, max($0, $1)) }
         let projections = await loadProjections(season: season, weeks: week...max(week, endWeek))
-        guard !projections.isEmpty else {
-            return WaiverScan(picks: [], eligibleLeagues: movable.count, bestBallLeagues: bestBallLeagues)
-        }
+        guard !projections.isEmpty else { return [] }
 
         let directory = (try? await api.players()) ?? [:]
-        guard !directory.isEmpty else {
-            return WaiverScan(picks: [], eligibleLeagues: movable.count, bestBallLeagues: bestBallLeagues)
-        }
+        guard !directory.isEmpty else { return [] }
 
-        let picks = await withTaskGroup(of: [WaiverPick].self) { group in
-            for league in movable {
+        return await withTaskGroup(of: [WaiverPick].self) { group in
+            for league in leagues {
                 guard let detail = details[league.leagueID] else { continue }
                 group.addTask {
                     await scan(
@@ -174,7 +151,6 @@ public struct WaiverScanner: Sendable {
             for await result in group { picks.append(contentsOf: result) }
             return picks.sorted { $0.uplift > $1.uplift }
         }
-        return WaiverScan(picks: picks, eligibleLeagues: movable.count, bestBallLeagues: bestBallLeagues)
     }
 
     // MARK: One league
@@ -217,11 +193,17 @@ public struct WaiverScanner: Sendable {
         }
         let baseline = weekly.mapValues { lineupTotal($0, positions, slots) }
 
+        // Only positions this league can actually start; a kicker in a league
+        // with no K slot is noise, however well he projects.
+        let startable = Set(slots.filter { !$0.isBench }.flatMap(\.eligible))
+
         // Free agents: everyone with a projection who nobody in this league owns.
         let rostered = Set(rosters.flatMap(\.players))
         var candidates: [(id: String, position: String, weekly: [Int: Double], total: Double)] = []
         for (playerID, player) in directory {
-            guard !rostered.contains(playerID), Self.waiverPositions.contains(player.position) else { continue }
+            guard !rostered.contains(playerID),
+                  Self.waiverPositions.contains(player.position),
+                  startable.contains(player.position) else { continue }
             var scored: [Int: Double] = [:]
             var total = 0.0
             for week in weeks {
@@ -259,7 +241,7 @@ public struct WaiverScanner: Sendable {
                     let value = lineupTotal(lineup, lineupPositions, slots) - (baseline[week] ?? 0)
                     uplift += weight(week) * value
                 }
-                guard uplift > options.minUplift, let add = directory[candidate.id] else { continue }
+                guard let add = directory[candidate.id] else { continue }
                 scored.append((
                     WaiverPick(
                         leagueID: league.leagueID,
@@ -285,10 +267,46 @@ public struct WaiverScanner: Sendable {
             if let current = best[entry.pick.addID], current.uplift >= entry.uplift { continue }
             best[entry.pick.addID] = entry
         }
-        return best.values
-            .sorted { $0.uplift > $1.uplift }
+        let ranked = best.values.sorted { $0.uplift > $1.uplift }
+
+        // Deep best-ball rosters mean the wire often holds nothing that cracks
+        // the lineup. Rather than going silent, fill the list with the best
+        // names still out there and let the row say so.
+        var picks = ranked.filter { $0.uplift > options.minUplift }
             .prefix(options.picksPerLeague)
             .map(\.pick)
+        if picks.count < options.picksPerLeague {
+            // The filler's drop should be your cheapest body, not whatever drop
+            // happened to tie at zero uplift.
+            let cheapest = myRoster
+                .filter { directory[$0] != nil }
+                .map { id in
+                    (id, weeks.reduce(0.0) { $0 + weight($1) * (weekly[$1]?[id] ?? 0) })
+                }
+                .min { $0.1 < $1.1 }?.0
+            let shown = Set(picks.map(\.addID))
+            for entry in ranked where !shown.contains(entry.pick.addID) {
+                guard picks.count < options.picksPerLeague else { break }
+                let pick = entry.pick
+                let dropID = (cheapest == pick.addID ? nil : cheapest) ?? pick.dropID
+                let drop = directory[dropID]
+                picks.append(WaiverPick(
+                    leagueID: pick.leagueID,
+                    leagueName: pick.leagueName,
+                    addID: pick.addID,
+                    addName: pick.addName,
+                    addPosition: pick.addPosition,
+                    addTeam: pick.addTeam,
+                    dropID: dropID,
+                    dropName: drop?.displayName ?? pick.dropName,
+                    dropPosition: drop?.position ?? pick.dropPosition,
+                    dropTeam: drop?.team ?? pick.dropTeam,
+                    uplift: 0,
+                    isUpgrade: false
+                ))
+            }
+        }
+        return picks
     }
 
     // MARK: Helpers

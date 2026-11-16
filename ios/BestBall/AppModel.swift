@@ -31,10 +31,6 @@ final class AppModel: ObservableObject {
     /// Suggestions you haven't opened the Waivers screen for yet.
     @Published private(set) var unseenWaiverCount = 0
     @Published private(set) var isScanningWaivers = false
-    /// Leagues where Sleeper actually lets you add and drop players.
-    @Published private(set) var waiverEligibleLeagues = 0
-    /// Best-ball leagues, which have no wire at all.
-    @Published private(set) var bestBallLeagues = 0
 
     private let loader = ScoresLoader()
     private let service = BestBallService()
@@ -127,8 +123,6 @@ final class AppModel: ObservableObject {
         isTrackingLiveActivity = false
         waivers = []
         unseenWaiverCount = 0
-        waiverEligibleLeagues = 0
-        bestBallLeagues = 0
         BackgroundRefresh.cancel()
         Task { await liveActivities.end() }
     }
@@ -227,8 +221,6 @@ final class AppModel: ObservableObject {
     private func restoreWaivers() {
         guard let report = SharedStore.loadWaiverReport() else { return }
         waivers = report.picks
-        waiverEligibleLeagues = report.eligibleLeagues
-        bestBallLeagues = report.bestBallLeagues
         let seen = SharedStore.seenWaiverIDs()
         unseenWaiverCount = report.picks.filter { !seen.contains($0.id) }.count
     }
@@ -239,30 +231,22 @@ final class AppModel: ObservableObject {
         defer { isScanningWaivers = false }
 
         let targetWeek = waiverWeek
-        let scan = await waiverScanner.scan(
+        let picks = await waiverScanner.scan(
             leagues: leagues,
             userID: account.userID,
             week: targetWeek,
             season: currentSeason
         )
         lastWaiverScan = Date()
-        waivers = scan.picks
-        waiverEligibleLeagues = scan.eligibleLeagues
-        bestBallLeagues = scan.bestBallLeagues
+        waivers = picks
         SharedStore.saveWaiverReport(
-            WaiverReport(
-                week: targetWeek,
-                generated: Date(),
-                picks: scan.picks,
-                eligibleLeagues: scan.eligibleLeagues,
-                bestBallLeagues: scan.bestBallLeagues
-            )
+            WaiverReport(week: targetWeek, generated: Date(), picks: picks)
         )
         let seen = SharedStore.seenWaiverIDs()
-        unseenWaiverCount = scan.picks.filter { !seen.contains($0.id) }.count
+        unseenWaiverCount = picks.filter { !seen.contains($0.id) }.count
 
         if notify {
-            await WaiverNotifier.announce(scan.picks)
+            await WaiverNotifier.announce(picks)
         }
     }
 

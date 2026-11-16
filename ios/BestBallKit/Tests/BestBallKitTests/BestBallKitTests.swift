@@ -371,15 +371,14 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         // Same cases as tests/test_waiver.py.
         let settings = SleeperLeague.Settings(
             playoffWeekStart: start, playoffTeams: teams,
-            playoffRoundType: roundType, numTeams: 12, bestBall: nil
+            playoffRoundType: roundType, numTeams: 12
         )
         #expect(WaiverScanner.seasonEndWeek(settings) == expected)
     }
 
     @Test func seasonEndWeekDefaultsToTheFullSeason() {
         let noPlayoffs = SleeperLeague.Settings(
-            playoffWeekStart: 0, playoffTeams: 0, playoffRoundType: 0,
-            numTeams: 12, bestBall: nil
+            playoffWeekStart: 0, playoffTeams: 0, playoffRoundType: 0, numTeams: 12
         )
         #expect(WaiverScanner.seasonEndWeek(noPlayoffs) == 18)
     }

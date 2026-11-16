@@ -253,17 +253,11 @@ struct WaiversView: View {
                                 Text("Scoring free agents…")
                                     .foregroundStyle(.secondary)
                             }
-                        } else if model.waiverEligibleLeagues == 0, model.bestBallLeagues > 0 {
-                            ContentUnavailableView(
-                                "Best-ball leagues have no wire",
-                                systemImage: "lock",
-                                description: Text("All \(model.bestBallLeagues) of your leagues are best ball: Sleeper locks rosters after the draft, so there are no adds, drops, or trades to recommend. This screen fills in for any league that allows moves.")
-                            )
                         } else {
                             ContentUnavailableView(
                                 "No adds worth making",
                                 systemImage: "checkmark.seal",
-                                description: Text("Nothing on the wire improves your lineup by a point or more. That's usually good news.")
+                                description: Text("No free agent improves your projected lineup, so standing pat is the right move.")
                             )
                         }
                     }
@@ -309,9 +303,15 @@ private struct WaiverRow: View {
                 Text("Add \(pick.addName)")
                     .font(.subheadline.weight(.semibold))
                 Spacer(minLength: 8)
-                Text("+\(String(format: "%.1f", pick.uplift))")
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.green)
+                if pick.isUpgrade {
+                    Text("+\(String(format: "%.1f", pick.uplift))")
+                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.green)
+                } else {
+                    Text("best available")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
             }
             Text("\(pick.addPosition) · \(pick.addTeam)  ·  drop \(pick.dropName) (\(pick.dropPosition))")
                 .font(.caption)
