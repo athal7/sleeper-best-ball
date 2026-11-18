@@ -31,12 +31,17 @@ final class AppModel: ObservableObject {
     /// Suggestions you haven't opened the Waivers screen for yet.
     @Published private(set) var unseenWaiverCount = 0
     @Published private(set) var isScanningWaivers = false
+    /// False until a waiver scan has finished once, so the screen shows
+    /// "scoring" instead of claiming there are no adds.
+    @Published private(set) var hasScannedWaivers = false
 
     /// Win-win trade offers across every league, best first.
     @Published private(set) var trades: [TradeOffer] = []
     /// Per-league rosters and projections the Trade Analyzer works from.
     @Published private(set) var tradeBoards: [TradeBoard] = []
     @Published private(set) var isScanningTrades = false
+    /// Same guard for the trade list: an unfinished scan is not an empty scan.
+    @Published private(set) var hasScannedTrades = false
 
     private let loader = ScoresLoader()
     private let service = BestBallService()
@@ -149,6 +154,8 @@ final class AppModel: ObservableObject {
         isTrackingLiveActivity = false
         waivers = []
         unseenWaiverCount = 0
+        hasScannedWaivers = false
+        hasScannedTrades = false
         trades = []
         tradeBoards = []
         BackgroundRefresh.cancel()
@@ -175,7 +182,13 @@ final class AppModel: ObservableObject {
         guard !UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey) else { return }
         guard !loaded.isEmpty else { return }
 
-        let matchups = loaded.prefix(LiveActivityController.maxActivities).compactMap { week in
+        // Only leagues with a player on the field right now get an activity, so
+        // the Lock Screen isn't holding a card for a league that has nothing
+        // live (all games done, or none started yet).
+        let liveNow = loaded.filter { week in
+            week.userTeam?.players.contains(where: \.isLive) == true
+        }
+        let matchups = liveNow.prefix(LiveActivityController.maxActivities).compactMap { week in
             week.widgetSnapshot().map {
                 LiveActivityController.TrackedMatchup(
                     leagueID: week.leagueID,
@@ -249,6 +262,7 @@ final class AppModel: ObservableObject {
     private func restoreWaivers() {
         guard let report = SharedStore.loadWaiverReport() else { return }
         waivers = report.picks.filter(\.isUpgrade)
+        hasScannedWaivers = true
         let seen = SharedStore.seenWaiverIDs()
         unseenWaiverCount = waivers.filter { !seen.contains($0.id) }.count
     }
@@ -267,6 +281,7 @@ final class AppModel: ObservableObject {
         )
         lastWaiverScan = Date()
         waivers = picks
+        hasScannedWaivers = true
         SharedStore.saveWaiverReport(
             WaiverReport(week: targetWeek, generated: Date(), picks: picks)
         )
@@ -302,6 +317,7 @@ final class AppModel: ObservableObject {
         )
         trades = scan.offers
         tradeBoards = scan.boards
+        hasScannedTrades = true
     }
 
     func refresh() async {

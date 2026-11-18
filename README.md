@@ -41,4 +41,4 @@ cd ios/BestBallKit
 swift test
 ```
 
-The waiver guide, trade tools, and draft assistant are not part of the iOS app yet.
+The iOS app carries the same waiver guide and trade tools as the web app, down to the offer numbers; the draft assistant is still web-only. It also has a StoreKit tip jar, and Live Activities only appear for leagues where you currently have a player on the field.

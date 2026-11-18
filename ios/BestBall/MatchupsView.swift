@@ -5,6 +5,7 @@ struct MatchupsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showingWaivers = false
     @State private var showingTrades = false
+    @State private var showingTips = false
 
     var body: some View {
         NavigationStack {
@@ -38,6 +39,16 @@ struct MatchupsView: View {
                 }
 
                 liveActivitySection
+
+                Section {
+                    Button {
+                        showingTips = true
+                    } label: {
+                        Label("Send a tip", systemImage: "heart")
+                    }
+                } footer: {
+                    Text("The app is free and ad-free. Tips go straight to the developer through the App Store.")
+                }
             }
             .navigationTitle("My Scores")
             .navigationBarTitleDisplayMode(.inline)
@@ -87,6 +98,9 @@ struct MatchupsView: View {
             .sheet(isPresented: $showingTrades) {
                 TradesView()
                     .environmentObject(model)
+            }
+            .sheet(isPresented: $showingTips) {
+                TipJarView()
             }
             .overlay {
                 if model.isLoading, !model.leagueWeeks.isEmpty {
@@ -276,12 +290,16 @@ struct WaiversView: View {
             List {
                 if model.waivers.isEmpty {
                     Section {
-                        if model.isScanningWaivers {
+                        // A scan that hasn't finished is not an empty result.
+                        if model.isScanningWaivers || !model.hasScannedWaivers {
                             HStack(spacing: 12) {
                                 ProgressView()
                                 Text("Scoring free agents…")
                                     .foregroundStyle(.secondary)
                             }
+                            Text("Checking every roster against the waiver wire. This takes a few seconds per league.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         } else {
                             ContentUnavailableView(
                                 "No adds worth making",
@@ -303,10 +321,18 @@ struct WaiversView: View {
                     }
 
                     Section {
+                        if model.isScanningWaivers {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                Text("Rescoring free agents…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Button {
                             Task { await model.refreshWaivers(notify: false) }
                         } label: {
-                            Label("Rescan", systemImage: "arrow.clockwise")
+                            Label(model.isScanningWaivers ? "Rescanning…" : "Rescan",
+                                  systemImage: "arrow.clockwise")
                         }
                         .disabled(model.isScanningWaivers)
                     } footer: {

@@ -2,31 +2,46 @@ import Foundation
 
 // MARK: - Models
 
-/// One player in a trade. `projection` is the weighted average weekly
-/// projection across the weeks the scan scored, standing in for the P50/P90
-/// columns the Streamlit trade table shows.
+/// One player in a trade. `p50`/`p90` are the season projections the Streamlit
+/// trade table prints under each name: the median weekly score and the mean
+/// plus 1.2816 standard deviations across weeks 1-18.
 public struct TradeAsset: Codable, Hashable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let position: String
     public let team: String
-    public let projection: Double
+    public let p50: Double
+    public let p90: Double
 
-    public init(id: String, name: String, position: String, team: String, projection: Double) {
+    public init(id: String, name: String, position: String, team: String,
+                p50: Double = 0, p90: Double = 0) {
         self.id = id
         self.name = name
         self.position = position
         self.team = team
-        self.projection = projection
+        self.p50 = p50
+        self.p90 = p90
     }
 
-    /// The small detail line under a player's name: "RB - KC · Proj 12.3".
+    /// The small detail line under a player's name, same shape as
+    /// `player_detail_text` in the Streamlit app: "RB - KC · P50 12.3 · P90 18.9".
     public var detailText: String {
         var parts: [String] = []
         let teamLine = "\(position) - \(team)".trimmingCharacters(in: CharacterSet(charactersIn: " -"))
         if !teamLine.isEmpty { parts.append(teamLine) }
-        if projection > 0 { parts.append(String(format: "Proj %.1f", projection)) }
+        if p50 != 0 { parts.append(String(format: "P50 %.1f", p50)) }
+        if p90 != 0 { parts.append(String(format: "P90 %.1f", p90)) }
         return parts.joined(separator: " · ")
+    }
+
+    /// Sleeper web profile for the player, like `sleeper_player_url` on the web.
+    public var profileURL: URL? {
+        let slug = name.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        guard !id.isEmpty else { return nil }
+        let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        return URL(string: "https://sleeper.com/nfl/players/\(slug)-\(escaped)")
     }
 }
 
@@ -113,6 +128,28 @@ public struct TradeBoard: Identifiable, Sendable {
     /// Positions that appear on any roster, sorted for the need pickers.
     public var positions: [String] {
         Array(Set(teams.flatMap { $0.assets.map(\.position) })).sorted()
+    }
+
+    /// The slot set the Streamlit app scores trades with.
+    ///
+    /// `DraftSettings.from_draft` reads `slots_qb`-style keys that real Sleeper
+    /// leagues do not have, so the web path falls through to
+    /// `DraftSettings.from_actual_roster`: one slot per player the *user's own*
+    /// roster carries, each slot eligible only for that position. Every rostered
+    /// player therefore scores, bench included, and no flex slot exists. Rebuild
+    /// the same set here so the two apps agree to the decimal.
+    public static func rosterSlots(for assets: [TradeAsset]) -> [Slot] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for asset in assets {
+            if counts[asset.position] == nil { order.append(asset.position) }
+            counts[asset.position, default: 0] += 1
+        }
+        return order.flatMap { position in
+            (0..<(counts[position] ?? 0)).map { _ in
+                Slot(label: position, position: position, eligible: [position])
+            }
+        }
     }
 
     public func team(_ teamID: String) -> TradeTeam? {
@@ -368,10 +405,10 @@ public struct TradeScanner: Sendable {
         }
         guard !details.isEmpty else { return empty }
 
-        let endWeek = leagues
-            .compactMap { details[$0.leagueID].map { WaiverScanner.seasonEndWeek($0.settings) } }
-            .reduce(18) { min(18, max($0, $1)) }
-        let projections = await loadProjections(season: season, weeks: week...max(week, endWeek))
+        // The whole regular season, like `build_projection_inputs` on the web: the
+        // season P50/P90 lines are built from weeks 1-18, not just the weeks
+        // still to be played.
+        let projections = await loadProjections(season: season, weeks: 1...18)
         guard !projections.isEmpty else { return empty }
 
         let directory = (try? await api.players()) ?? [:]
@@ -410,18 +447,23 @@ public struct TradeScanner: Sendable {
               directory: [String: SleeperPlayer], userID: String, week: Int,
               projections: [Int: StatTable]) async -> (offers: [TradeOffer], board: TradeBoard?) {
         guard let rosters = try? await api.rosters(leagueID: league.leagueID),
-              rosters.contains(where: { $0.ownerID == userID }) else { return ([], nil) }
+              let myRoster = rosters.first(where: { $0.ownerID == userID }) else { return ([], nil) }
 
-        let slots = LineupSlots.slots(for: detail.rosterPositions)
-        guard slots.contains(where: { !$0.isBench }) else { return ([], nil) }
+        let users = (try? await api.users(leagueID: league.leagueID)) ?? []
+        let usersByID = Dictionary(users.map { ($0.userID, $0) }, uniquingKeysWith: { first, _ in first })
 
-        let weeks = (week...max(week, WaiverScanner.seasonEndWeek(detail.settings))).filter {
-            $0 <= 18 && projections[$0] != nil
-        }
+        let seasonEnd = WaiverScanner.seasonEndWeek(detail.settings)
+        let scoredWeeks = (1...18).filter { projections[$0] != nil }
+        let weeks = scoredWeeks.filter { $0 >= week && $0 <= seasonEnd }
         guard !weeks.isEmpty else { return ([], nil) }
 
-        let playoffStart = detail.settings.playoffWeekStart ?? 15
-        let weights = weeks.map { $0 >= playoffStart ? 1.5 : 1.0 }
+        // Only a league that actually defines a playoff start weights those weeks
+        // at 1.5, matching `_compute_trade_recommendations`.
+        let playoffStart = detail.settings.playoffWeekStart
+        let weights = weeks.map { scored in
+            if let playoffStart, scored >= playoffStart { return 1.5 }
+            return 1.0
+        }
         let totalWeight = weights.reduce(0, +)
 
         let scoring = detail.scoringSettings
@@ -430,48 +472,85 @@ public struct TradeScanner: Sendable {
             return Scoring.points(stats: stats, scoring: scoring)
         }
 
+        let rosteredIDs = rosters.flatMap(\.players)
+
         // Every rostered player's scored projection per week, used for both the
         // offers and the analyzer's board.
         var weekly: [Int: [String: Double]] = [:]
-        for week in weeks {
-            let table = projections[week] ?? [:]
-            var scored: [String: Double] = [:]
-            for playerID in rosters.flatMap(\.players) {
-                scored[playerID] = points(table, playerID)
+        for scored in weeks {
+            let table = projections[scored] ?? [:]
+            var values: [String: Double] = [:]
+            for playerID in rosteredIDs {
+                values[playerID] = points(table, playerID)
             }
-            weekly[week] = scored
+            weekly[scored] = values
+        }
+
+        // Season P50/P90 across every week with projection data, built the way
+        // `build_season_projections` does: median, mean + 1.2816 * std.
+        var seasonLines: [String: (p50: Double, p90: Double)] = [:]
+        for playerID in rosteredIDs {
+            var values: [Double] = []
+            for scored in scoredWeeks {
+                guard let table = projections[scored], table[playerID] != nil else { continue }
+                values.append(points(table, playerID))
+            }
+            guard values.count > 1 else {
+                seasonLines[playerID] = (values.first ?? 0, values.first ?? 0)
+                continue
+            }
+            let sorted = values.sorted()
+            let middle = sorted.count / 2
+            let median = sorted.count % 2 == 0
+                ? (sorted[middle - 1] + sorted[middle]) / 2
+                : sorted[middle]
+            let mean = values.reduce(0, +) / Double(values.count)
+            let variance = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(values.count - 1)
+            seasonLines[playerID] = (median, mean + 1.2816 * variance.squareRoot())
         }
 
         func assets(for roster: SleeperRoster) -> [TradeAsset] {
             roster.players.compactMap { playerID in
                 guard let player = directory[playerID] else { return nil }
-                var projection = 0.0
-                for (index, week) in weeks.enumerated() {
-                    projection += weights[index] * (weekly[week]?[playerID] ?? 0)
-                }
+                let lines = seasonLines[playerID] ?? (0, 0)
                 return TradeAsset(
                     id: playerID,
                     name: player.displayName,
                     position: player.position,
                     team: player.team,
-                    projection: totalWeight > 0 ? projection / totalWeight : 0
+                    p50: lines.p50,
+                    p90: lines.p90
                 )
             }
+        }
+
+        // Team names the way the web's roster table builds them: the Sleeper team
+        // name when the league set one, else the owner's display name, else
+        // "Team <roster id>".
+        func teamName(_ roster: SleeperRoster) -> String {
+            let custom = roster.teamName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !custom.isEmpty { return custom }
+            if let owner = roster.ownerID.flatMap({ usersByID[$0] }) {
+                let display = owner.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !display.isEmpty { return display }
+                let username = owner.username?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if !username.isEmpty { return username }
+            }
+            return "Team \(roster.rosterID)"
         }
 
         let teams: [TradeTeam] = rosters.compactMap { roster in
             let players = assets(for: roster)
             guard !players.isEmpty else { return nil }
-            let name = roster.teamName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return TradeTeam(
-                id: String(roster.rosterID),
-                name: name.isEmpty ? "Team \(roster.rosterID)" : name,
-                assets: players
-            )
+            return TradeTeam(id: String(roster.rosterID), name: teamName(roster), assets: players)
         }
         guard teams.count > 1 else { return ([], nil) }
 
-        let userTeamID = rosters.first { $0.ownerID == userID }.map { String($0.rosterID) }
+        let myAssets = assets(for: myRoster)
+        let slots = TradeBoard.rosterSlots(for: myAssets)
+        guard !slots.isEmpty else { return ([], nil) }
+
+        let userTeamID = String(myRoster.rosterID)
         let board = TradeBoard(
             id: league.leagueID,
             name: league.name,
@@ -483,7 +562,7 @@ public struct TradeScanner: Sendable {
             weekly: weekly
         )
 
-        let myTeamID = userTeamID ?? teams[0].id
+        let myTeamID = userTeamID
         var offers: [TradeOffer] = []
         for partner in teams where partner.id != myTeamID {
             let found = board.analyze(

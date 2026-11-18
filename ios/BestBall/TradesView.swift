@@ -13,13 +13,18 @@ struct TradesView: View {
     var body: some View {
         NavigationStack {
             List {
-                if model.isScanningTrades, model.trades.isEmpty {
+                if model.trades.isEmpty, model.isScanningTrades || !model.hasScannedTrades {
+                    // Analyzing is not the same as "no trades": show work in
+                    // progress until a scan has actually finished.
                     Section {
                         HStack(spacing: 12) {
                             ProgressView()
                             Text("Scoring trade offers…")
                                 .foregroundStyle(.secondary)
                         }
+                        Text("Comparing every roster against the other teams in each league. This takes a few seconds per league.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 } else if model.trades.isEmpty {
                     Section {
@@ -30,22 +35,36 @@ struct TradesView: View {
                         )
                     }
                 } else {
+                    // Very likely the same offer set the web's "All win-win
+                    // trades in this league" blocks list, under "### Partner".
                     ForEach(leagues) { league in
-                        Section(league.name) {
+                        Section {
                             ForEach(league.partners) { partner in
                                 PartnerHeaderRow(name: partner.name)
                                 ForEach(partner.offers) { offer in
                                     TradeOfferRow(offer: offer)
                                 }
                             }
+                        } header: {
+                            Text(league.name)
+                        } footer: {
+                            Text("League ID: \(league.id)")
                         }
                     }
 
                     Section {
+                        if model.isScanningTrades {
+                            HStack(spacing: 12) {
+                                ProgressView()
+                                Text("Rescoring trade offers…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Button {
                             Task { await model.refreshTrades() }
                         } label: {
-                            Label("Rescan", systemImage: "arrow.clockwise")
+                            Label(model.isScanningTrades ? "Rescanning…" : "Rescan",
+                                  systemImage: "arrow.clockwise")
                         }
                         .disabled(model.isScanningTrades)
                     } footer: {
@@ -63,7 +82,7 @@ struct TradesView: View {
                 }
             }
             .task {
-                if model.trades.isEmpty, !model.isScanningTrades {
+                if !model.hasScannedTrades, !model.isScanningTrades {
                     await model.refreshTrades()
                 }
             }
@@ -198,9 +217,9 @@ private struct TradeOfferRow: View {
                         Image(systemName: systemImage)
                             .font(.system(size: 8))
                             .foregroundStyle(tint)
-                        Text(player.name)
-                            .font(.subheadline)
-                            .lineLimit(1)
+                        // Names open the Sleeper web profile, like the links in
+                        // the web trade table.
+                        playerLink(for: player)
                     }
                     Text(player.detailText)
                         .font(.caption2)
@@ -211,6 +230,23 @@ private struct TradeOfferRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func playerLink(for player: TradeAsset) -> some View {
+        if let url = player.profileURL {
+            Link(destination: url) {
+                Text(player.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+            }
+            .buttonStyle(.plain)
+            .tint(.primary)
+        } else {
+            Text(player.name)
+                .font(.subheadline)
+                .lineLimit(1)
+        }
     }
 }
 

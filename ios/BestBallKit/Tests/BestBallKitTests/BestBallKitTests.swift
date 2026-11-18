@@ -388,7 +388,7 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
     private let slots = LineupSlots.slots(for: ["RB", "WR"])
 
     private func asset(_ id: String, _ position: String, _ points: Double) -> TradeAsset {
-        TradeAsset(id: id, name: id.uppercased(), position: position, team: "KC", projection: points)
+        TradeAsset(id: id, name: id.uppercased(), position: position, team: "KC", p50: points)
     }
 
     /// One scored week, so the uplift is plain points per week.
@@ -468,5 +468,42 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         )
         let offers = board.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 1)
         #expect(offers.contains { $0.give.count == 2 && $0.receive.count == 2 })
+    }
+
+    @Test func rosterSlotsMirrorTheUsersOwnRoster() {
+        // The Streamlit app falls back to DraftSettings.from_actual_roster, so the
+        // slot set is one slot per player on the user's roster, eligible only for
+        // that player's own position — no flex, no bench.
+        let assets = [
+            asset("qb1", "QB", 20), asset("qb2", "QB", 18),
+            asset("rb1", "RB", 15), asset("wr1", "WR", 12),
+        ]
+        let slots = TradeBoard.rosterSlots(for: assets)
+        #expect(slots.count == 4)
+        #expect(slots.filter { $0.position == "QB" }.count == 2)
+        #expect(slots.allSatisfy { $0.eligible == [$0.position] })
+        #expect(slots.allSatisfy { !$0.isBench })
+    }
+
+    @Test func everyRosteredPlayerScoresUnderRosterSlots() {
+        // Two receivers against two backs, scored with the web's roster slots:
+        // both of my receivers fill a slot, so the swap has to count the second
+        // receiver the way the web's bench-less lineup does.
+        let mine = [asset("wr1", "WR", 20), asset("wr2", "WR", 18)]
+        let theirs = [asset("rb1", "RB", 20), asset("rb2", "RB", 18)]
+        let board = TradeBoard(
+            id: "L1", name: "League",
+            teams: [
+                TradeTeam(id: "1", name: "Your team", assets: mine),
+                TradeTeam(id: "2", name: "Partner Team", assets: theirs),
+            ],
+            userTeamID: "1", slots: TradeBoard.rosterSlots(for: mine),
+            weeks: [1], weights: [1.0],
+            weekly: [1: ["wr1": 20, "wr2": 18, "rb1": 20, "rb2": 18]]
+        )
+        // My lineup is 20 + 18 = 38 with no back slot at all, so sending a
+        // receiver for a back drops my score instead of raising it.
+        let offers = board.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 0)
+        #expect(offers.isEmpty)
     }
 }
