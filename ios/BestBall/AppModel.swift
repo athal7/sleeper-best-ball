@@ -239,9 +239,9 @@ final class AppModel: ObservableObject {
 
     private func restoreWaivers() {
         guard let report = SharedStore.loadWaiverReport() else { return }
-        waivers = report.picks
+        waivers = report.picks.filter(\.isUpgrade)
         let seen = SharedStore.seenWaiverIDs()
-        unseenWaiverCount = report.picks.filter { !seen.contains($0.id) }.count
+        unseenWaiverCount = waivers.filter { !seen.contains($0.id) }.count
     }
 
     func refreshWaivers(notify: Bool) async {
@@ -318,7 +318,9 @@ enum WaiverNotifier {
     static func announce(_ picks: [WaiverPick]) async {
         guard !picks.isEmpty else { return }
         let already = SharedStore.notifiedWaiverIDs()
-        let fresh = picks.filter { !already.contains($0.id) }
+        // Only real upgrades are announced, matching the web guide's filter;
+        // reports cached by older builds may still contain filler picks.
+        let fresh = picks.filter { $0.isUpgrade && !already.contains($0.id) }
         guard !fresh.isEmpty, let top = fresh.max(by: { $0.uplift < $1.uplift }) else { return }
 
         let center = UNUserNotificationCenter.current()

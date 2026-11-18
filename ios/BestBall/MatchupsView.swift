@@ -272,7 +272,7 @@ struct WaiversView: View {
                             ContentUnavailableView(
                                 "No adds worth making",
                                 systemImage: "checkmark.seal",
-                                description: Text("No free agent improves your projected lineup, so standing pat is the right move.")
+                                description: Text("No free agent improves your projected lineup by more than 1 point per week, so standing pat is the right move.")
                             )
                         }
                     }
@@ -296,7 +296,7 @@ struct WaiversView: View {
                         }
                         .disabled(model.isScanningWaivers)
                     } footer: {
-                        Text("Projected points gained over the rest of the season, playoff weeks counted 1.5×. It's an estimate: it ignores injuries, bidding wars, and who else wants the same player.")
+                        Text("Projected points gained per week over the rest of the season, playoff weeks counted 1.5×. It's an estimate: it ignores injuries, bidding wars, and who else wants the same player.")
                     }
                 }
             }

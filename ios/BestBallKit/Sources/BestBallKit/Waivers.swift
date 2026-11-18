@@ -14,11 +14,12 @@ public struct WaiverPick: Codable, Hashable, Identifiable, Sendable {
     public let dropName: String
     public let dropPosition: String
     public let dropTeam: String
-    /// Projected points gained over the rest of the season, playoff weeks
-    /// counted 1.5x. Zero or below means the add wouldn't crack your lineup.
+    /// Average points gained per week over the rest of the season, playoff
+    /// weeks counted 1.5x. Matches the uplift the Streamlit waiver guide shows.
     public let uplift: Double
-    /// False for a "best available" filler: the wire is thin enough that no add
-    /// improves your projected lineup, so this is simply the best name on it.
+    /// True for a real upgrade. Kept so reports cached before the iOS scanner
+    /// applied the web guide's per-week filter still decode; new picks are
+    /// always upgrades.
     public let isUpgrade: Bool
 
     /// Stable identity for "have I already been told about this one?".
@@ -83,10 +84,11 @@ public struct WaiverScanner: Sendable {
         public var picksPerLeague: Int
         /// Free agents to actually simulate, highest rest-of-season total first.
         public var candidateLimit: Int
-        /// Suggestions have to be worth at least this many points to be shown.
+        /// Suggestions have to be worth more than this many points per week,
+        /// weighted like the Streamlit guide's `best_uplift > 1`, to be shown.
         public var minUplift: Double
 
-        public init(picksPerLeague: Int = 3, candidateLimit: Int = 40, minUplift: Double = 0) {
+        public init(picksPerLeague: Int = 3, candidateLimit: Int = 40, minUplift: Double = 1.0) {
             self.picksPerLeague = picksPerLeague
             self.candidateLimit = candidateLimit
             self.minUplift = minUplift
@@ -183,6 +185,7 @@ public struct WaiverScanner: Sendable {
 
         let playoffStart = detail.settings.playoffWeekStart ?? 15
         func weight(_ week: Int) -> Double { week >= playoffStart ? 1.5 : 1.0 }
+        let totalWeight = weeks.reduce(0.0) { $0 + weight($1) }
 
         var weekly: [Int: [String: Double]] = [:]
         for week in weeks {
@@ -211,7 +214,9 @@ public struct WaiverScanner: Sendable {
                 scored[week] = value
                 total += value * weight(week)
             }
-            guard total > options.minUplift else { continue }
+            // A candidate's own average sets the ceiling on its uplift, so
+            // anything at zero can't clear the guide's threshold.
+            guard total / totalWeight > 0 else { continue }
             candidates.append((playerID, player.position, scored, total))
         }
         candidates.sort { $0.total > $1.total }
@@ -241,6 +246,10 @@ public struct WaiverScanner: Sendable {
                     let value = lineupTotal(lineup, lineupPositions, slots) - (baseline[week] ?? 0)
                     uplift += weight(week) * value
                 }
+                // Same filter as the Streamlit guide: the weighted average must
+                // beat one point per week, not a season-long sum.
+                let averageUplift = uplift / totalWeight
+                guard averageUplift > options.minUplift else { continue }
                 guard let add = directory[candidate.id] else { continue }
                 scored.append((
                     WaiverPick(
@@ -254,9 +263,9 @@ public struct WaiverScanner: Sendable {
                         dropName: drop.displayName,
                         dropPosition: drop.position,
                         dropTeam: drop.team,
-                        uplift: uplift
+                        uplift: averageUplift
                     ),
-                    uplift
+                    averageUplift
                 ))
             }
         }
@@ -269,44 +278,12 @@ public struct WaiverScanner: Sendable {
         }
         let ranked = best.values.sorted { $0.uplift > $1.uplift }
 
-        // Deep best-ball rosters mean the wire often holds nothing that cracks
-        // the lineup. Rather than going silent, fill the list with the best
-        // names still out there and let the row say so.
-        var picks = ranked.filter { $0.uplift > options.minUplift }
+        // Like the Streamlit guide, an empty wire means no suggestions at all
+        // rather than a padded "best available" list.
+        return ranked
+            .filter { $0.uplift > options.minUplift }
             .prefix(options.picksPerLeague)
             .map(\.pick)
-        if picks.count < options.picksPerLeague {
-            // The filler's drop should be your cheapest body, not whatever drop
-            // happened to tie at zero uplift.
-            let cheapest = myRoster
-                .filter { directory[$0] != nil }
-                .map { id in
-                    (id, weeks.reduce(0.0) { $0 + weight($1) * (weekly[$1]?[id] ?? 0) })
-                }
-                .min { $0.1 < $1.1 }?.0
-            let shown = Set(picks.map(\.addID))
-            for entry in ranked where !shown.contains(entry.pick.addID) {
-                guard picks.count < options.picksPerLeague else { break }
-                let pick = entry.pick
-                let dropID = (cheapest == pick.addID ? nil : cheapest) ?? pick.dropID
-                let drop = directory[dropID]
-                picks.append(WaiverPick(
-                    leagueID: pick.leagueID,
-                    leagueName: pick.leagueName,
-                    addID: pick.addID,
-                    addName: pick.addName,
-                    addPosition: pick.addPosition,
-                    addTeam: pick.addTeam,
-                    dropID: dropID,
-                    dropName: drop?.displayName ?? pick.dropName,
-                    dropPosition: drop?.position ?? pick.dropPosition,
-                    dropTeam: drop?.team ?? pick.dropTeam,
-                    uplift: 0,
-                    isUpgrade: false
-                ))
-            }
-        }
-        return picks
     }
 
     // MARK: Helpers
