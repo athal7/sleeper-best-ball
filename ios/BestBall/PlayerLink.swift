@@ -6,12 +6,11 @@ import BestBallKit
 
 /// A tappable player anywhere in the app.
 ///
-/// Sleeper gives us two places to send someone: its web profile for that player,
-/// and the app itself. The app has no per-player deep link — its universal links
-/// cover only its chat pages (`/topics/`, `/channels/`, `/message/`) and the
+/// Tapping opens the Sleeper app. It has no per-player deep link — its universal
+/// links cover only its chat pages (`/topics/`, `/channels/`, `/message/`) and the
 /// `sleeper://` scheme has no documented player route, so it opens on its home
-/// screen. Tapping therefore offers the app when it is installed, plus the web
-/// profile, and falls straight through to the profile when it is not.
+/// screen rather than the player. When the app is not installed the tap falls
+/// through to the player's web profile, which does land on the player.
 struct PlayerLink: Identifiable, Hashable {
     let id: String
     let name: String
@@ -32,13 +31,6 @@ struct PlayerLink: Identifiable, Hashable {
     /// The page the Streamlit app links to.
     var webURL: URL? { SleeperProfile.url(name: name, id: id) }
 
-    /// Whether Sleeper's app is on this phone. Needs `sleeper` in
-    /// `LSApplicationQueriesSchemes` (see Info.plist) or this is always false.
-    static var appIsInstalled: Bool {
-        guard let url = appURL else { return false }
-        return UIApplication.shared.canOpenURL(url)
-    }
-
     static var appURL: URL? { URL(string: "sleeper://") }
 }
 
@@ -51,38 +43,27 @@ struct PlayerNameButton: View {
     var font: Font = .subheadline
     var weight: Font.Weight = .regular
 
-    @State private var showingOptions = false
-
     var body: some View {
-        Button(action: tap) {
+        Button(action: openInSleeperApp) {
             Text(player.name)
                 .font(font.weight(weight))
                 .lineLimit(1)
                 .foregroundStyle(.primary)
+                // Without this the tap target is the glyphs alone, which is a
+                // sliver of a row and reads as a dead label.
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens this player in Sleeper")
-        .confirmationDialog(player.name, isPresented: $showingOptions, titleVisibility: .visible) {
-            Button("Open in Sleeper app") { open(PlayerLink.appURL) }
-            if let url = player.webURL {
-                Button("Player page on sleeper.com") { open(url) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Sleeper has no per-player app link yet, so its app opens on the home screen.")
-        }
     }
 
-    private func tap() {
-        if PlayerLink.appIsInstalled {
-            showingOptions = true
-        } else if let url = player.webURL {
-            open(url)
+    /// One tap, no chooser: the app if it takes the URL, else the web profile.
+    private func openInSleeperApp() {
+        guard let appURL = PlayerLink.appURL else { return }
+        UIApplication.shared.open(appURL, options: [:]) { opened in
+            guard !opened, let webURL = player.webURL else { return }
+            UIApplication.shared.open(webURL)
         }
-    }
-
-    private func open(_ url: URL?) {
-        guard let url else { return }
-        UIApplication.shared.open(url)
     }
 }

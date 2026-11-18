@@ -507,6 +507,55 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         #expect(padded?.isBalanced == true)
     }
 
+    @Test func leagueLineupFindsDealsTheRosterSlotFallbackMisses() {
+        // I carry no tight end at all, so under the web's roster slots (one slot
+        // per player I own) a tight end is worth nothing to me and the partner's
+        // two of them are invisible. With the league's real lineup my empty TE
+        // slot makes their spare one valuable, and I have a bench receiver they
+        // can start — the trade both sides want.
+        let mine = [
+            asset("qb1", "QB", 20), asset("rb1", "RB", 15), asset("rb2", "RB", 10),
+            asset("wr1", "WR", 20), asset("wr2", "WR", 18), asset("wr3", "WR", 12),
+        ]
+        let theirs = [
+            asset("qb2", "QB", 18), asset("rb3", "RB", 22), asset("rb4", "RB", 19),
+            asset("wr4", "WR", 9), asset("wr5", "WR", 8),
+            asset("te1", "TE", 15), asset("te2", "TE", 12),
+        ]
+        let weekly: [String: Double] = [
+            "qb1": 20, "rb1": 15, "rb2": 10, "wr1": 20, "wr2": 18, "wr3": 12,
+            "qb2": 18, "rb3": 22, "rb4": 19, "wr4": 9, "wr5": 8,
+            "te1": 15, "te2": 12,
+        ]
+        func board(slots: [Slot]) -> TradeBoard {
+            TradeBoard(
+                id: "L1", name: "League",
+                teams: [
+                    TradeTeam(id: "1", name: "Your team", assets: mine),
+                    TradeTeam(id: "2", name: "Partner Team", assets: theirs),
+                ],
+                userTeamID: "1", slots: slots,
+                weeks: [1], weights: [1.0],
+                weekly: [1: weekly]
+            )
+        }
+
+        let lineup = board(slots: LineupSlots.slots(for: ["QB", "RB", "RB", "WR", "WR", "TE"]))
+        let offers = lineup.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 0)
+        let teDeal = offers.first {
+            $0.receive.contains { $0.id == "te1" || $0.id == "te2" }
+                && $0.give.contains { $0.id == "wr3" }
+        }
+        #expect(teDeal != nil)
+        #expect(teDeal?.myUplift ?? 0 > 0)
+        #expect(teDeal?.partnerUplift ?? 0 > 0)
+
+        // The fallback sees no tight end slot on my roster, so the same deal
+        // cannot help me and the offer never appears.
+        let fallback = board(slots: TradeBoard.rosterSlots(for: mine))
+        #expect(fallback.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 0).isEmpty)
+    }
+
     @Test func rosterSlotsMirrorTheUsersOwnRoster() {
         // The Streamlit app falls back to DraftSettings.from_actual_roster, so the
         // slot set is one slot per player on the user's roster, eligible only for

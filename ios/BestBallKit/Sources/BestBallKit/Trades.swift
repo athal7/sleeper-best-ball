@@ -607,7 +607,13 @@ public struct TradeScanner: Sendable {
         guard teams.count > 1 else { return ([], nil) }
 
         let myAssets = assets(for: myRoster)
-        let slots = TradeBoard.rosterSlots(for: myAssets)
+        // Trades are scored against the league's real starting lineup, not the
+        // web's `from_actual_roster` fallback (see `TradeBoard.rosterSlots`).
+        // Under the fallback a trade is almost zero-sum — every rostered player
+        // owns a slot — so only one partner in a league ever had a mutually
+        // profitable package. A real lineup gives both sides bench players worth
+        // nothing to them and starters worth something to the other team.
+        let slots = LineupSlots.slots(for: detail.rosterPositions)
         guard !slots.isEmpty else { return ([], nil) }
 
         let userTeamID = String(myRoster.rosterID)

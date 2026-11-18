@@ -79,16 +79,23 @@ confirming it actually archived and uploaded.
   Reuse one unique 24-character hex id per entry and check it is not already used.
 - Commit subjects are Conventional Commits (`feat(ios): …`, `fix(waivers): …`),
   imperative, lowercase, under 72 characters.
-- Trade and waiver numbers are user-visible and mirror the Python app. When the two
-  disagree the Python implementation in `streamlit_app.py` is the reference, and
-  `tests/test_trade.py` / the waiver tests are the expectations to match.
-- Trade and waiver scoring slots are a quirk worth preserving: `DraftSettings.from_draft`
+- Waiver numbers are user-visible and mirror the Python app. When the two disagree
+  the Python implementation in `streamlit_app.py` is the reference, and the waiver
+  tests are the expectations to match.
+- Waiver scoring slots keep a quirk worth preserving: `DraftSettings.from_draft`
   reads `slots_qb`-style keys real Sleeper leagues do not have, so the web falls back
   to `from_actual_roster` — one slot per player on *your* roster, each eligible only
   for that player's own position, bench and flex included. `LineupSlots.rosterSlots`
-  rebuilds exactly that, and both scanners use it. Do not "fix" it to use
-  `roster_positions`: iOS then stops matching the web. Verified against live leagues
-  with a Python reference of the web path — identical offers, adds, drops and uplifts.
+  rebuilds exactly that and `WaiverScanner` uses it. Do not "fix" waivers to use
+  `roster_positions`: iOS then stops matching the web.
+- Trade scoring deliberately does not follow that fallback. `TradeScanner` scores
+  trades against the league's real starting lineup (`LineupSlots.slots(for:
+  detail.rosterPositions)`, bench slots ignored by `LineupScorer`). Under
+  `rosterSlots` every rostered player owns a slot, so a package can barely help both
+  sides at once: Metro Master returned 5 offers from 1 partner, and `bergmanfam`
+  returned none. With the real lineup the same two leagues return 23 offers from 7
+  partners and 11 offers from 3 — bench players are worth nothing to their own team
+  and something to the other one. Keep it that way; the divergence is intentional.
 - Trade packages are deliberately balanced where the web's are not: when one side
   would send two players for one, `TradeBoard.analyze` attaches the throw-in that
   side would cut anyway (weakest weighted rest-of-season total) and rescores. The
@@ -100,8 +107,10 @@ confirming it actually archived and uploaded.
   `ios/BestBall/PlayerLink.swift`). Sleeper publishes no per-player app link: its
   universal links cover only `/topics/`, `/channels/`, `/topic/`, `/message/`, and
   the `sleeper://` scheme has no documented player route, so the app opens on its
-  home screen. The button offers the app when `canOpenURL` says it is installed
-  (needs `sleeper` in `LSApplicationQueriesSchemes`) and the web profile otherwise.
+  home screen. The button is a single tap with no chooser — it opens `sleeper://`
+  and, only if the app will not take the URL, falls through to the web profile.
+  Keep `contentShape(Rectangle())` on the label: without it the hit area is the
+  glyphs alone and the name reads as a dead label.
 - A screen that kicks off its own scan must key its `.task` on the data it needs
   (`TradesView` uses `model.leagues.count`). Opening the sheet before the leagues
   have loaded otherwise bails out of the scan and leaves the spinner running forever.
