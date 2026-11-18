@@ -1,4 +1,4 @@
-name: Streamlit app
+name: Tests
 
 on:
   push:
@@ -10,14 +10,41 @@ permissions:
   contents: read
 
 jobs:
+  rust:
+    name: Engine (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - run: cargo test --manifest-path core/Cargo.toml
+
   streamlit:
+    name: Streamlit app
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - uses: streamlit/streamlit-app-action@v0.0.3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          app-path: streamlit_app.py
-          pytest-args: -v --ignore=tests/test_app.py
+          workspaces: core
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: core/bestball-py
+          args: --release --out dist
+      # The wheel installs before the app's other requirements so pytest
+      # exercises the same engine build Streamlit deploys.
+      - run: pip install dist/*.whl
+      - run: pip install -r requirements.txt
+      - run: pip install pytest
+      - run: python -m pytest tests -v --ignore=tests/test_app.py
+      - run: |
+          python - <<'PY'
+          import bestball_core
+          print("engine", bestball_core.__version__)
+          PY

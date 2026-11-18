@@ -107,10 +107,26 @@ confirming it actually archived and uploaded.
   must not re-derive slot tables or uplift. The boundary is JSON over a C ABI
   (`bestball_request` / `bestball_string_free`): Swift links the static library,
   Python loads the dylib with `ctypes`.
-- Until a surface is wired to `core/`, the old copies are still authoritative
-  there. `core/scripts/parity_lineup.py` and `parity_uplift.py` compare the Rust
-  engine with the Python implementation on randomized leagues and must report
-  zero mismatches after any change to either side
+- Layout: `core/` is the engine (`bestball_engine`), `core/bestball-py/` is the
+  PyO3 wrapper that produces the `bestball_core` wheel. They are separate crates
+  because a static library and a Python extension cannot share one link setup,
+  and because iOS must never link libpython. Build the wheel with
+  `cd core/bestball-py && ../../.venv/bin/maturin build --release` and install
+  it into `.venv`; `streamlit_app.py` imports `bestball_core` and will not start
+  without it.
+- The web already delegates the two hottest primitives to the engine:
+  `_best_lineup_score` and `compute_lineup_uplift` (which waivers and trades
+  both value players with) are thin pandas adapters. What is still Python-only
+  is the search around them: waiver add/drop selection, trade package building,
+  and projection preparation.
+- Streamlit deploys from `requirements.txt` and cannot compile Rust, so the web
+  gets a prebuilt abi3 wheel. `.github/workflows/engine-wheels.yml` builds one
+  per platform on an `engine-v*` tag; pin the manylinux asset in
+  `requirements.txt` before deploying. Update the pin whenever engine behaviour
+  changes, or the web will keep running the old numbers.
+- `core/scripts/parity_lineup.py` and `parity_uplift.py` compare the Rust
+  engine with the Python path on randomized leagues; they must report zero
+  mismatches after any change to either side
   (`cargo build --release && .venv/bin/python core/scripts/parity_uplift.py`).
 - Change one surface, change the other: the trade rule also has a mirrored pair
   of tests, `leagueLineupFindsDealsTheRosterSlotFallbackMisses` in

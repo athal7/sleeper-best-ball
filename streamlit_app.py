@@ -1,4 +1,5 @@
 import streamlit as st
+import bestball_core
 import numpy as np
 import pandas as pd
 import requests
@@ -824,30 +825,27 @@ def _slot_priority(slot: str) -> int:
 
 def _best_lineup_score(positions: pd.Series | list[str],
                        scores: pd.Series | list[float], slots: list[str]) -> float:
+    """Best-lineup total for `slots`, scored by the shared engine.
+
+    The arithmetic lives in `core/` (Rust) and is the same code the iOS app
+    links; this only adapts pandas columns to the call.
+    """
     if isinstance(positions, pd.Series):
         pos_vals = positions.to_numpy()
     else:
-        pos_vals = np.asarray(positions)
+        pos_vals = np.asarray(positions, dtype=object)
     if isinstance(scores, pd.Series):
         index = positions.index if isinstance(positions, pd.Series) else range(len(pos_vals))
-        score_vals = scores.reindex(index).fillna(0.0).to_numpy()
+        score_vals = scores.reindex(index).fillna(0.0).to_numpy(dtype=float)
     else:
         score_vals = np.asarray(scores, dtype=float)
+    if len(pos_vals) == 0 or not slots:
+        return 0.0
 
-    order = np.argsort(-score_vals)
-    sorted_pos = pos_vals[order]
-    sorted_scores = score_vals[order]
-
-    ordered_slots = sorted(slots, key=_slot_priority)
-    total = 0.0
-    used = np.zeros(len(order), dtype=bool)
-    for slot in ordered_slots:
-        eligible = SLOT_ELIGIBILITY.get(slot, [slot])
-        for i in range(len(order)):
-            if not used[i] and sorted_pos[i] in eligible:
-                used[i] = True
-                total += sorted_scores[i]
-                break
+    players = [(str(index), str(position), float(score))
+               for index, (position, score) in enumerate(zip(pos_vals, score_vals))]
+    total, _ = bestball_core.best_lineup_score(
+        [str(slot) for slot in slots], players)
     return float(total)
 
 
@@ -862,37 +860,36 @@ def compute_lineup_uplift(pool: pd.DataFrame, weekly_points: pd.DataFrame,
         for slot, count in settings.slots.items()
         for _ in range(count)
     ]
+    if undrafted.empty or not slots or weekly_points.empty:
+        return uplift
+
+    weeks = sorted(weekly_points.columns)
     roster_positions = my_roster['position'].tolist() if not my_roster.empty else []
     roster_indices = my_roster.index.tolist() if not my_roster.empty else []
-    weekly_dict = {w: weekly_points[w].to_dict() for w in weekly_points.columns}
-    playoff_weight = 1.5 if playoff_week_start is not None else 1.0
-    total_weight = 0.0
-    for week in weekly_points.columns:
-        weight = (playoff_weight
-                  if playoff_week_start is not None and week >= playoff_week_start
-                  else 1.0)
-        total_weight += weight
-        w_dict = weekly_dict.get(week, {})
-        scores = [float(w_dict.get(pid, 0.0)) for pid in roster_indices]
-        baseline = _best_lineup_score(roster_positions, scores, slots)
-        without_slot = [
-            _best_lineup_score(
-                roster_positions, scores, slots[:index] + slots[index + 1:])
-            for index in range(len(slots))
-        ]
-        candidate_scores = weekly_points[week].reindex(undrafted.index).fillna(0.0)
-        for position in undrafted['position'].unique():
-            eligible_scores = [
-                without_slot[index]
-                for index, slot in enumerate(slots)
-                if position in SLOT_ELIGIBILITY[slot]
-            ]
-            if eligible_scores:
-                candidate_index = undrafted.index[undrafted['position'] == position]
-                uplift.loc[candidate_index] += weight * np.maximum(
-                    0.0, candidate_scores.loc[candidate_index] +
-                    max(eligible_scores) - baseline)
-    return uplift / max(total_weight, 1.0)
+    weekly_dicts = {week: weekly_points[week].to_dict() for week in weeks}
+
+    def weekly(pid) -> list[float]:
+        return [float(weekly_dicts[week].get(pid, 0.0)) for week in weeks]
+
+    # The engine numbers weeks from the start of the range; map the real playoff
+    # week onto that position so weighting follows the actual column order.
+    core_playoff_start = None
+    if playoff_week_start is not None:
+        later = [index for index, week in enumerate(weeks, start=1)
+                 if week >= playoff_week_start]
+        core_playoff_start = later[0] if later else None
+
+    values = bestball_core.lineup_uplift(
+        [str(slot) for slot in slots],
+        [(str(pid), str(position), weekly(pid))
+         for pid, position in zip(roster_indices, roster_positions)],
+        [(str(pid), str(position), weekly(pid))
+         for pid, position in zip(undrafted.index, undrafted['position'])],
+        len(weeks),
+        core_playoff_start,
+    )
+    return pd.Series([values.get(str(pid), 0.0) for pid in undrafted.index],
+                     index=undrafted.index, dtype=float)
 
 
 SCARCITY_WEIGHT = 1.0  # per-point erosion in replacement value one round later

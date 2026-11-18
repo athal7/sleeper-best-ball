@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "bestball-core"
+version = "0.1.0"
+description = "Shared Best Ball engine: lineup scoring, waiver and trade uplift"
+requires-python = ">=3.10"
+
+[tool.maturin]
+module-name = "bestball_core"

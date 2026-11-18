@@ -5,7 +5,7 @@ edition = "2021"
 description = "Shared trade/waiver/scoring engine for the Best Ball iOS app and Streamlit app"
 
 [lib]
-name = "bestball_core"
+name = "bestball_engine"
 # staticlib + cdylib for the two shells, rlib for the Rust tests.
 crate-type = ["staticlib", "cdylib", "rlib"]
 

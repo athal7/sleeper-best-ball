@@ -1,0 +1,15 @@
+[package]
+name = "bestball-py"
+version = "0.1.0"
+edition = "2021"
+description = "Python bindings for the shared Best Ball engine"
+
+[lib]
+# Imported by streamlit_app.py as `import bestball_core`.
+name = "bestball_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+bestball-core = { path = ".." }
+# abi3 so one wheel works on every Python >= 3.10, including CI and Streamlit Cloud.
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }

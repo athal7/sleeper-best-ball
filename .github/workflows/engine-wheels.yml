@@ -1,0 +1,52 @@
+name: Engine wheels
+
+# Streamlit deploys from requirements.txt and cannot build Rust, so the web
+# surface consumes a prebuilt wheel. Tag a release (engine-v0.1.0) and pin the
+# uploaded asset in requirements.txt:
+#
+#   bestball-core @ https://github.com/OWNER/REPO/releases/download/engine-v0.1.0/bestball_core-0.1.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+#
+# The wheel is abi3, so one file per platform covers every Python >= 3.10.
+
+on:
+  push:
+    tags: ["engine-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  wheels:
+    name: Wheel (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Streamlit Cloud runs x86_64 Linux.
+          - os: ubuntu-latest
+            platform: manylinux
+            target: x86_64
+            manylinux: "2014"
+          - os: macos-latest
+            platform: macos
+            target: aarch64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core
+      - uses: PyO3/maturin-action@v1
+        with:
+          working-directory: core/bestball-py
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.platform }}-${{ matrix.target }}
+          path: core/bestball-py/dist/*.whl
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: core/bestball-py/dist/*.whl
