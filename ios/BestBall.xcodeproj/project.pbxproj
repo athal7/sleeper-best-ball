@@ -22,6 +22,7 @@
 		3C4D5E6F708100000000000D /* MatchupActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */; };
 		3C4D5E6F708100000000000E /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000E /* LiveActivityController.swift */; };
 		3C4D5E6F708100000000000F /* MatchupLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */; };
+		3C4D5E6F7081000000000010 /* TradesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F70000000000010 /* TradesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 		2B3C4D5E6F7000000000000D /* MatchupActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchupActivityAttributes.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F7000000000000E /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchupLiveActivity.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F70000000000010 /* TradesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradesView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -113,6 +115,7 @@
 				2B3C4D5E6F70000000000004 /* MatchupsView.swift */,
 				2B3C4D5E6F70000000000005 /* MatchupDetailView.swift */,
 				2B3C4D5E6F70000000000006 /* Components.swift */,
+				2B3C4D5E6F70000000000010 /* TradesView.swift */,
 				2B3C4D5E6F7000000000000E /* LiveActivityController.swift */,
 				2B3C4D5E6F70000000000007 /* Assets.xcassets */,
 			);
@@ -251,6 +254,7 @@
 				3C4D5E6F7081000000000004 /* MatchupsView.swift in Sources */,
 				3C4D5E6F7081000000000005 /* MatchupDetailView.swift in Sources */,
 				3C4D5E6F7081000000000006 /* Components.swift in Sources */,
+				3C4D5E6F7081000000000010 /* TradesView.swift in Sources */,
 				3C4D5E6F708100000000000E /* LiveActivityController.swift in Sources */,
 				3C4D5E6F708100000000000C /* MatchupActivityAttributes.swift in Sources */,
 			);

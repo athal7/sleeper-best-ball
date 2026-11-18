@@ -4,6 +4,7 @@ import BestBallKit
 struct MatchupsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showingWaivers = false
+    @State private var showingTrades = false
 
     var body: some View {
         NavigationStack {
@@ -68,10 +69,23 @@ struct MatchupsView: View {
                     }
                     .accessibilityLabel("Waiver suggestions")
                 }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingTrades = true
+                    } label: {
+                        Image(systemName: "arrow.2.squarepath")
+                    }
+                    .accessibilityLabel("Trade suggestions")
+                }
             }
             .refreshable { await model.refresh() }
             .sheet(isPresented: $showingWaivers) {
                 WaiversView()
+                    .environmentObject(model)
+            }
+            .sheet(isPresented: $showingTrades) {
+                TradesView()
                     .environmentObject(model)
             }
             .overlay {

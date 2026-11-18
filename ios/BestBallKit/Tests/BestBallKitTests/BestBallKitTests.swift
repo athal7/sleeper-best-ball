@@ -383,3 +383,90 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         #expect(WaiverScanner.seasonEndWeek(noPlayoffs) == 18)
     }
 }
+
+@Suite struct TradeTests {
+    private let slots = LineupSlots.slots(for: ["RB", "WR"])
+
+    private func asset(_ id: String, _ position: String, _ points: Double) -> TradeAsset {
+        TradeAsset(id: id, name: id.uppercased(), position: position, team: "KC", projection: points)
+    }
+
+    /// One scored week, so the uplift is plain points per week.
+    private func board(my: [TradeAsset], partner: [TradeAsset],
+                       weekly: [String: Double]) -> TradeBoard {
+        TradeBoard(
+            id: "L1", name: "League",
+            teams: [
+                TradeTeam(id: "1", name: "Your team", assets: my),
+                TradeTeam(id: "2", name: "Partner Team", assets: partner),
+            ],
+            userTeamID: "1", slots: slots, weeks: [1], weights: [1.0],
+            weekly: [1: weekly]
+        )
+    }
+
+    @Test func winWinSwapHelpsBothSides() {
+        // Same case as test_compute_trade_recommendations_win_win_trade.
+        let board = board(
+            my: [asset("wr1", "WR", 20), asset("wr2", "WR", 18)],
+            partner: [asset("rb1", "RB", 20), asset("rb2", "RB", 18)],
+            weekly: ["wr1": 20, "wr2": 18, "rb1": 20, "rb2": 18]
+        )
+        let offers = board.analyze(myTeamID: "1", partnerTeamID: "2")
+        #expect(offers.count == 4)
+
+        let trade = offers.first { $0.give.map(\.id) == ["wr2"] && $0.receive.map(\.id) == ["rb2"] }
+        expectClose(trade?.myUplift ?? 0, 18)
+        expectClose(trade?.partnerUplift ?? 0, 18)
+    }
+
+    @Test func oneSidedTradeIsExcluded() {
+        // Same case as test_compute_trade_recommendations_excludes_one_sided_trade.
+        let board = board(
+            my: [asset("wr_weak", "WR", 10)],
+            partner: [asset("rb_star", "RB", 20), asset("wr_good", "WR", 15)],
+            weekly: ["wr_weak": 10, "rb_star": 20, "wr_good": 15]
+        )
+        #expect(board.analyze(myTeamID: "1", partnerTeamID: "2").isEmpty)
+    }
+
+    @Test func positionNeedsFilterBothSides() {
+        let board = board(
+            my: [asset("wr1", "WR", 20), asset("wr2", "WR", 18)],
+            partner: [asset("rb1", "RB", 20), asset("rb2", "RB", 18), asset("wr3", "WR", 12)],
+            weekly: ["wr1": 20, "wr2": 18, "rb1": 20, "rb2": 18, "wr3": 12]
+        )
+        let mine = board.analyze(myTeamID: "1", partnerTeamID: "2", myNeed: "RB")
+        #expect(!mine.isEmpty)
+        #expect(mine.allSatisfy { $0.receive.allSatisfy { $0.position == "RB" } })
+
+        let theirs = board.analyze(myTeamID: "1", partnerTeamID: "2", partnerNeed: "WR")
+        #expect(!theirs.isEmpty)
+        #expect(theirs.allSatisfy { $0.give.allSatisfy { $0.position == "WR" } })
+    }
+
+    @Test func leagueThresholdRequiresMoreThanOnePointPerWeek() {
+        let board = board(
+            my: [asset("wr1", "WR", 20), asset("wr2", "WR", 18)],
+            partner: [asset("rb1", "RB", 20), asset("rb2", "RB", 18)],
+            weekly: ["wr1": 20, "wr2": 18, "rb1": 20, "rb2": 18]
+        )
+        // The best offers gain 20 a week, and the analyzer's zero threshold is
+        // what keeps them; a 19-point bar clears nothing.
+        #expect(board.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 1).count == 4)
+        #expect(board.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 19).isEmpty)
+    }
+
+    @Test func packagesPairTheBestPlayersToo() {
+        // My spare receivers against a partner who only has backs: two-for-two
+        // deals exist alongside the straight swaps.
+        let board = board(
+            my: [asset("wr1", "WR", 20), asset("wr2", "WR", 18), asset("wr3", "WR", 16)],
+            partner: [asset("rb1", "RB", 20), asset("rb2", "RB", 18), asset("rb3", "RB", 16)],
+            weekly: ["wr1": 20, "wr2": 18, "wr3": 16,
+                     "rb1": 20, "rb2": 18, "rb3": 16]
+        )
+        let offers = board.analyze(myTeamID: "1", partnerTeamID: "2", minUplift: 1)
+        #expect(offers.contains { $0.give.count == 2 && $0.receive.count == 2 })
+    }
+}

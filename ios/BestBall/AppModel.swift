@@ -32,9 +32,16 @@ final class AppModel: ObservableObject {
     @Published private(set) var unseenWaiverCount = 0
     @Published private(set) var isScanningWaivers = false
 
+    /// Win-win trade offers across every league, best first.
+    @Published private(set) var trades: [TradeOffer] = []
+    /// Per-league rosters and projections the Trade Analyzer works from.
+    @Published private(set) var tradeBoards: [TradeBoard] = []
+    @Published private(set) var isScanningTrades = false
+
     private let loader = ScoresLoader()
     private let service = BestBallService()
     private let waiverScanner = WaiverScanner()
+    private let tradeScanner = TradeScanner()
     private var lastWaiverScan: Date?
     private let liveActivities = LiveActivityController.shared
     private var account: SleeperAccount?
@@ -142,6 +149,8 @@ final class AppModel: ObservableObject {
         isTrackingLiveActivity = false
         waivers = []
         unseenWaiverCount = 0
+        trades = []
+        tradeBoards = []
         BackgroundRefresh.cancel()
         Task { await liveActivities.end() }
     }
@@ -274,6 +283,25 @@ final class AppModel: ObservableObject {
     func markWaiversSeen() {
         SharedStore.markWaiversSeen(waivers.map(\.id))
         unseenWaiverCount = 0
+    }
+
+    // MARK: Trades
+
+    /// Scans every league for win-win offers. The projections are already on
+    /// disk from the waiver scan, so this is mostly local lineup scoring.
+    func refreshTrades() async {
+        guard isConnected, let account, !leagues.isEmpty else { return }
+        isScanningTrades = true
+        defer { isScanningTrades = false }
+
+        let scan = await tradeScanner.scan(
+            leagues: leagues,
+            userID: account.userID,
+            week: waiverWeek,
+            season: currentSeason
+        )
+        trades = scan.offers
+        tradeBoards = scan.boards
     }
 
     func refresh() async {
