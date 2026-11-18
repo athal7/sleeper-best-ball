@@ -99,12 +99,24 @@ confirming it actually archived and uploaded.
   lineup the same two leagues return 23 offers from 7 partners and 11 offers from
   3 — bench players are worth nothing to their own team and something to the other
   one. Keep it that way; the divergence from the old web numbers is intentional.
-- Swift and Python cannot share code, so the trade rule is kept in step by a
-  mirrored pair of tests: `leagueLineupFindsDealsTheRosterSlotFallbackMisses` in
+- The two surfaces are migrating onto one engine in `core/` (Rust). It owns the
+  platform-neutral arithmetic — slot expansion and eligibility, stat-line
+  scoring, greedy lineup selection, and the lineup-uplift value model that
+  waivers and trades are both built from. Shells pass raw inputs in (a league's
+  `roster_positions`, weekly points per player) and render the results; they
+  must not re-derive slot tables or uplift. The boundary is JSON over a C ABI
+  (`bestball_request` / `bestball_string_free`): Swift links the static library,
+  Python loads the dylib with `ctypes`.
+- Until a surface is wired to `core/`, the old copies are still authoritative
+  there. `core/scripts/parity_lineup.py` and `parity_uplift.py` compare the Rust
+  engine with the Python implementation on randomized leagues and must report
+  zero mismatches after any change to either side
+  (`cargo build --release && .venv/bin/python core/scripts/parity_uplift.py`).
+- Change one surface, change the other: the trade rule also has a mirrored pair
+  of tests, `leagueLineupFindsDealsTheRosterSlotFallbackMisses` in
   `BestBallKitTests` and
   `test_trades_use_the_league_lineup_not_the_users_own_roster_shape` in
-  `tests/test_trade.py` use the same rosters and must keep reaching the same
-  conclusion. Change one, change the other.
+  `tests/test_trade.py`, built from the same rosters.
 - Trade packages are deliberately balanced where the web's are not: when one side
   would send two players for one, `TradeBoard.analyze` attaches the throw-in that
   side would cut anyway (weakest weighted rest-of-season total) and rescores. The
