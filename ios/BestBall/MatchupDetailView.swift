@@ -120,9 +120,8 @@ private struct MatchupPlayerCell: View {
         VStack(alignment: .leading, spacing: 2) {
             if let player {
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(player.name)
-                        .font(.caption.weight(.medium))
-                        .lineLimit(1)
+                    PlayerNameButton(player: PlayerLink(player),
+                                     font: .caption, weight: .medium)
                     Spacer(minLength: 2)
                     Text(player.pointsText)
                         .font(.caption.monospacedDigit().weight(.semibold))

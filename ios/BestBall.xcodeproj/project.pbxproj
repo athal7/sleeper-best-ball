@@ -24,6 +24,7 @@
 		3C4D5E6F708100000000000F /* MatchupLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */; };
 		3C4D5E6F7081000000000010 /* TradesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F70000000000010 /* TradesView.swift */; };
 		3C4D5E6F7081000000000011 /* TipJarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F70000000000011 /* TipJarView.swift */; };
+		3C4D5E6F7081000000000012 /* PlayerLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B3C4D5E6F70000000000012 /* PlayerLink.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -67,6 +68,7 @@
 		2B3C4D5E6F7000000000000F /* MatchupLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatchupLiveActivity.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F70000000000010 /* TradesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TradesView.swift; sourceTree = "<group>"; };
 		2B3C4D5E6F70000000000011 /* TipJarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipJarView.swift; sourceTree = "<group>"; };
+		2B3C4D5E6F70000000000012 /* PlayerLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerLink.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -119,6 +121,7 @@
 				2B3C4D5E6F70000000000006 /* Components.swift */,
 				2B3C4D5E6F70000000000010 /* TradesView.swift */,
 				2B3C4D5E6F70000000000011 /* TipJarView.swift */,
+				2B3C4D5E6F70000000000012 /* PlayerLink.swift */,
 				2B3C4D5E6F7000000000000E /* LiveActivityController.swift */,
 				2B3C4D5E6F70000000000007 /* Assets.xcassets */,
 			);
@@ -259,6 +262,7 @@
 				3C4D5E6F7081000000000006 /* Components.swift in Sources */,
 				3C4D5E6F7081000000000010 /* TradesView.swift in Sources */,
 				3C4D5E6F7081000000000011 /* TipJarView.swift in Sources */,
+				3C4D5E6F7081000000000012 /* PlayerLink.swift in Sources */,
 				3C4D5E6F708100000000000E /* LiveActivityController.swift in Sources */,
 				3C4D5E6F708100000000000C /* MatchupActivityAttributes.swift in Sources */,
 			);

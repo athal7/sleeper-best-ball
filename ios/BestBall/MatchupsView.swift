@@ -375,9 +375,10 @@ private struct DropHeaderRow: View {
                 .font(.caption2)
                 .foregroundStyle(.red)
 
-            Text("Drop \(pick.dropName)")
+            Text("Drop")
                 .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
+            PlayerNameButton(player: PlayerLink(id: pick.dropID, name: pick.dropName),
+                             weight: .semibold)
 
             Spacer(minLength: 6)
 
@@ -401,9 +402,8 @@ private struct WaiverRow: View {
                     .font(.caption2)
                     .foregroundStyle(.green)
 
-                Text(pick.addName)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
+                PlayerNameButton(player: PlayerLink(id: pick.addID, name: pick.addName),
+                                 weight: .medium)
 
                 Spacer(minLength: 6)
 

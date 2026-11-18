@@ -89,6 +89,19 @@ confirming it actually archived and uploaded.
   rebuilds exactly that, and both scanners use it. Do not "fix" it to use
   `roster_positions`: iOS then stops matching the web. Verified against live leagues
   with a Python reference of the web path — identical offers, adds, drops and uplifts.
+- Trade packages are deliberately balanced where the web's are not: when one side
+  would send two players for one, `TradeBoard.analyze` attaches the throw-in that
+  side would cut anyway (weakest weighted rest-of-season total) and rescores. The
+  row tags it `throw-in`. Keep the counts equal — a 2-for-1 leaves the receiving
+  manager over the roster limit with no say in who goes, which is the bug this
+  fixed. Uplifts themselves still come from the web's slot math, so they can
+  differ in size between the two sides; that is the estimate, not a defect.
+- Players are tappable everywhere they appear (`PlayerNameButton` in
+  `ios/BestBall/PlayerLink.swift`). Sleeper publishes no per-player app link: its
+  universal links cover only `/topics/`, `/channels/`, `/topic/`, `/message/`, and
+  the `sleeper://` scheme has no documented player route, so the app opens on its
+  home screen. The button offers the app when `canOpenURL` says it is installed
+  (needs `sleeper` in `LSApplicationQueriesSchemes`) and the web profile otherwise.
 - A screen that kicks off its own scan must key its `.task` on the data it needs
   (`TradesView` uses `model.leagues.count`). Opening the sheet before the leagues
   have loaded otherwise bails out of the scan and leaves the spinner running forever.

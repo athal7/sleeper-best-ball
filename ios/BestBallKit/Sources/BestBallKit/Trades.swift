@@ -36,10 +36,20 @@ public struct TradeAsset: Codable, Hashable, Identifiable, Sendable {
 
     /// Sleeper web profile for the player, like `sleeper_player_url` on the web.
     public var profileURL: URL? {
+        SleeperProfile.url(name: name, id: id)
+    }
+}
+
+/// Where a player's Sleeper page lives on the web, built the way
+/// `sleeper_player_url` does in the Streamlit app. Sleeper's app registers no
+/// per-player deep link (its universal links cover only its chat pages), so the
+/// web profile is the only address that resolves to a player.
+public enum SleeperProfile {
+    public static func url(name: String, id: String) -> URL? {
+        guard !id.isEmpty else { return nil }
         let slug = name.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        guard !id.isEmpty else { return nil }
         let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         return URL(string: "https://sleeper.com/nfl/players/\(slug)-\(escaped)")
     }
@@ -58,8 +68,21 @@ public struct TradeOffer: Codable, Hashable, Identifiable, Sendable {
     public let myUplift: Double
     /// Weighted points per week this deal adds to the partner's lineup.
     public let partnerUplift: Double
+    /// Players padded onto each side so the two packages hold the same number
+    /// of players. They are the ones that side would most likely cut, so the
+    /// deal doesn't leave anyone over the roster limit afterwards.
+    public let giveThrowIns: [String]
+    public let receiveThrowIns: [String]
 
     public var totalUplift: Double { myUplift + partnerUplift }
+
+    /// Throw-in ids on both sides, for the row that tags them.
+    public var throwInIDs: Set<String> { Set(giveThrowIns + receiveThrowIns) }
+
+    /// Balanced packages: one player each way, or two apiece. Sleeper leagues
+    /// keep roster sizes equal, so an uneven package is not the deal either
+    /// manager would actually make.
+    public var isBalanced: Bool { give.count == receive.count }
 
     public var id: String {
         let out = give.map(\.id).joined(separator: "+")
@@ -69,7 +92,8 @@ public struct TradeOffer: Codable, Hashable, Identifiable, Sendable {
 
     public init(leagueID: String, leagueName: String, partnerID: String, partnerName: String,
                 give: [TradeAsset], receive: [TradeAsset],
-                myUplift: Double, partnerUplift: Double) {
+                myUplift: Double, partnerUplift: Double,
+                giveThrowIns: [String] = [], receiveThrowIns: [String] = []) {
         self.leagueID = leagueID
         self.leagueName = leagueName
         self.partnerID = partnerID
@@ -78,6 +102,8 @@ public struct TradeOffer: Codable, Hashable, Identifiable, Sendable {
         self.receive = receive
         self.myUplift = myUplift
         self.partnerUplift = partnerUplift
+        self.giveThrowIns = giveThrowIns
+        self.receiveThrowIns = receiveThrowIns
     }
 }
 
@@ -151,6 +177,12 @@ public struct TradeBoard: Identifiable, Sendable {
     /// projected players on each roster. `minUplift` is points per week each
     /// side has to clear — the league-wide list uses 1.0, the analyzer uses 0,
     /// which keeps any strictly positive gain.
+    ///
+    /// The slot set stays the user's roster (see `rosterSlots`), like the web.
+    /// One deliberate difference: a package that sends two players for one is
+    /// padded with the throw-in that side would otherwise have to cut, so the
+    /// offer on screen is the deal both managers could actually accept. The
+    /// web leaves those packages uneven.
     public func analyze(
         myTeamID: String,
         partnerTeamID: String,
@@ -166,33 +198,77 @@ public struct TradeBoard: Identifiable, Sendable {
 
         let myBaseline = baselinePoints(for: myTeam)
         let partnerBaseline = baselinePoints(for: partnerTeam)
-        let myStates = states(for: myTeam)
-        let partnerStates = states(for: partnerTeam)
         let threshold = minUplift * totalWeight
 
+        // Wrap-up packages are rescored many times once throw-ins are attached,
+        // so keep the per-package week arrays around.
+        var cache: [String: ChoiceState] = [:]
+        func state(_ assets: [TradeAsset], of team: TradeTeam) -> ChoiceState {
+            let key = team.id + "|" + assets.map(\.id).sorted().joined(separator: ",")
+            if let hit = cache[key] { return hit }
+            let outgoingIDs = Set(assets.map(\.id))
+            let remaining = team.assets.filter { !outgoingIDs.contains($0.id) }
+            let made = ChoiceState(
+                assets: assets,
+                remainingPositions: remaining.map(\.position),
+                remainingPoints: weeks.map { week in remaining.map { points($0.id, week: week) } },
+                incomingPositions: assets.map(\.position),
+                incomingPoints: weeks.map { week in assets.map { points($0.id, week: week) } }
+            )
+            cache[key] = made
+            return made
+        }
+
+        var seen = Set<String>()
         var offers: [TradeOffer] = []
-        for give in myStates {
-            // A position need means every player that side receives has to
-            // play it, so the players going out are the ones filtered.
-            if let partnerNeed, give.assets.contains(where: { $0.position != partnerNeed }) {
-                continue
-            }
-            for receive in partnerStates {
-                if let myNeed, receive.assets.contains(where: { $0.position != myNeed }) {
+        for giveBase in packages(myTeam.assets, limit: 8) {
+            for receiveBase in packages(partnerTeam.assets, limit: 8) {
+                // Square up the player counts with the throw-ins each side would
+                // cut anyway, so neither manager ends up over the roster limit.
+                var give = giveBase
+                var receive = receiveBase
+                var giveThrowIns: [TradeAsset] = []
+                var receiveThrowIns: [TradeAsset] = []
+                let shortfall = receiveBase.count - giveBase.count
+                if shortfall > 0 {
+                    guard let padding = throwIns(for: myTeam, count: shortfall,
+                                                 excluding: Set(giveBase.map(\.id))) else { continue }
+                    give += padding
+                    giveThrowIns = padding
+                } else if shortfall < 0 {
+                    guard let padding = throwIns(for: partnerTeam, count: -shortfall,
+                                                 excluding: Set(receiveBase.map(\.id))) else { continue }
+                    receive += padding
+                    receiveThrowIns = padding
+                }
+
+                // A position need still means every player in the package plays
+                // it, throw-ins included, like the web's analyzer.
+                if let partnerNeed, give.contains(where: { $0.position != partnerNeed }) {
                     continue
                 }
+                if let myNeed, receive.contains(where: { $0.position != myNeed }) {
+                    continue
+                }
+
+                let key = give.map(\.id).sorted().joined(separator: ",") + "->"
+                    + receive.map(\.id).sorted().joined(separator: ",")
+                guard seen.insert(key).inserted else { continue }
+
+                let myState = state(give, of: myTeam)
+                let partnerState = state(receive, of: partnerTeam)
 
                 var mySum = 0.0
                 var partnerSum = 0.0
                 for (index, weight) in weights.enumerated() {
                     let myAfter = LineupScorer.total(
-                        positions: give.remainingPositions + receive.incomingPositions,
-                        points: give.remainingPoints[index] + receive.incomingPoints[index],
+                        positions: myState.remainingPositions + partnerState.incomingPositions,
+                        points: myState.remainingPoints[index] + partnerState.incomingPoints[index],
                         slots: slots
                     )
                     let partnerAfter = LineupScorer.total(
-                        positions: receive.remainingPositions + give.incomingPositions,
-                        points: receive.remainingPoints[index] + give.incomingPoints[index],
+                        positions: partnerState.remainingPositions + myState.incomingPositions,
+                        points: partnerState.remainingPoints[index] + myState.incomingPoints[index],
                         slots: slots
                     )
                     mySum += weight * (myAfter - myBaseline[index])
@@ -207,10 +283,12 @@ public struct TradeBoard: Identifiable, Sendable {
                         leagueName: name,
                         partnerID: partnerTeam.id,
                         partnerName: partnerTeam.name,
-                        give: give.assets,
-                        receive: receive.assets,
+                        give: give,
+                        receive: receive,
                         myUplift: mySum / totalWeight,
-                        partnerUplift: partnerSum / totalWeight
+                        partnerUplift: partnerSum / totalWeight,
+                        giveThrowIns: giveThrowIns.map(\.id),
+                        receiveThrowIns: receiveThrowIns.map(\.id)
                     )
                 )
             }
@@ -220,6 +298,24 @@ public struct TradeBoard: Identifiable, Sendable {
             if $0.myUplift != $1.myUplift { return $0.myUplift > $1.myUplift }
             return $0.partnerUplift > $1.partnerUplift
         }
+    }
+
+    /// The players a manager would most likely cut, weakest projected
+    /// rest-of-season total first. Used to pad an uneven package, and nil when
+    /// the roster cannot spare that many.
+    private func throwIns(for team: TradeTeam, count: Int,
+                          excluding ids: Set<String>) -> [TradeAsset]? {
+        guard count > 0 else { return [] }
+        let pool = team.assets
+            .filter { !ids.contains($0.id) }
+            .sorted { lhs, rhs in
+                let left = weightedTotal(lhs)
+                let right = weightedTotal(rhs)
+                if left == right { return lhs.id < rhs.id }
+                return left < right
+            }
+        guard pool.count >= count else { return nil }
+        return Array(pool.prefix(count))
     }
 
     // MARK: Scoring state
@@ -276,24 +372,6 @@ public struct TradeBoard: Identifiable, Sendable {
                 positions: positions,
                 points: team.assets.map { points($0.id, week: week) },
                 slots: slots
-            )
-        }
-    }
-
-    private func states(for team: TradeTeam, packageLimit: Int = 8) -> [ChoiceState] {
-        packages(team.assets, limit: packageLimit).map { outgoing in
-            let outgoingIDs = Set(outgoing.map(\.id))
-            let remaining = team.assets.filter { !outgoingIDs.contains($0.id) }
-            return ChoiceState(
-                assets: outgoing,
-                remainingPositions: remaining.map(\.position),
-                remainingPoints: weeks.map { week in
-                    remaining.map { points($0.id, week: week) }
-                },
-                incomingPositions: outgoing.map(\.position),
-                incomingPoints: weeks.map { week in
-                    outgoing.map { points($0.id, week: week) }
-                }
             )
         }
     }
@@ -448,8 +526,6 @@ public struct TradeScanner: Sendable {
             if let playoffStart, scored >= playoffStart { return 1.5 }
             return 1.0
         }
-        let totalWeight = weights.reduce(0, +)
-
         let scoring = detail.scoringSettings
         func points(_ table: StatTable, _ playerID: String) -> Double {
             guard let stats = table[playerID] else { return 0 }

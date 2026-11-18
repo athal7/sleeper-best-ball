@@ -470,6 +470,43 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         #expect(offers.contains { $0.give.count == 2 && $0.receive.count == 2 })
     }
 
+    @Test func unevenPackagesArePaddedWithTheCutCandidate() {
+        // Two for one leaves the side receiving the extra player over the roster
+        // limit, so the package is padded with the player they would cut anyway.
+        let board = board(
+            my: [asset("wr1", "WR", 20), asset("wr2", "WR", 18), asset("wr3", "WR", 3)],
+            partner: [asset("rb1", "RB", 25), asset("rb2", "RB", 24), asset("rb3", "RB", 1)],
+            weekly: ["wr1": 20, "wr2": 18, "wr3": 3,
+                     "rb1": 25, "rb2": 24, "rb3": 1]
+        )
+        let offers = board.analyze(myTeamID: "1", partnerTeamID: "2")
+        #expect(!offers.isEmpty)
+        // Every offer is a deal Sleeper would accept without a post-trade cut.
+        #expect(offers.allSatisfy { $0.isBalanced })
+        #expect(offers.allSatisfy { $0.give.count == $0.receive.count })
+
+        let padded = offers.first {
+            $0.give.map(\.id).sorted() == ["wr1", "wr2"] && $0.receive.contains { $0.id == "rb1" }
+        }
+        #expect(padded?.receive.map(\.id).sorted() == ["rb1", "rb3"])
+        // The throw-in is the partner's weakest back, not a starter.
+        #expect(padded?.receiveThrowIns == ["rb3"])
+        #expect(padded?.giveThrowIns.isEmpty == true)
+    }
+
+    @Test func receivingTwoForOneAddsMyOwnCutCandidate() {
+        let board = board(
+            my: [asset("wr1", "WR", 25), asset("wr2", "WR", 18), asset("wr3", "WR", 1)],
+            partner: [asset("rb1", "RB", 22), asset("rb2", "RB", 20)],
+            weekly: ["wr1": 25, "wr2": 18, "wr3": 1, "rb1": 22, "rb2": 20]
+        )
+        let offers = board.analyze(myTeamID: "1", partnerTeamID: "2")
+        let padded = offers.first { $0.receive.map(\.id).sorted() == ["rb1", "rb2"] }
+        #expect(padded?.give.map(\.id).sorted() == ["wr1", "wr3"])
+        #expect(padded?.giveThrowIns == ["wr3"])
+        #expect(padded?.isBalanced == true)
+    }
+
     @Test func rosterSlotsMirrorTheUsersOwnRoster() {
         // The Streamlit app falls back to DraftSettings.from_actual_roster, so the
         // slot set is one slot per player on the user's roster, eligible only for

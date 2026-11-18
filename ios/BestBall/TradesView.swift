@@ -76,7 +76,7 @@ struct TradesView: View {
                         }
                         .disabled(model.isScanningTrades)
                     } footer: {
-                        Text("Projected points gained per week over the rest of the season, playoff weeks counted 1.5×. It's an estimate: it ignores injuries, bidding wars, and who else wants the same player.")
+                        Text("Projected points gained per week over the rest of the season, playoff weeks counted 1.5×. Every offer sends and receives the same number of players: where one side would have been short, it is padded with a throw-in that side would likely cut anyway. It's an estimate: it ignores injuries, bidding wars, and who else wants the same player.")
                     }
                 }
 
@@ -228,11 +228,11 @@ private struct TradeOfferRow: View {
                         Image(systemName: systemImage)
                             .font(.system(size: 8))
                             .foregroundStyle(tint)
-                        // Names open the Sleeper web profile, like the links in
-                        // the web trade table.
-                        playerLink(for: player)
+                        // Names hand off to Sleeper, like the links in the web
+                        // trade table.
+                        PlayerNameButton(player: PlayerLink(player))
                     }
-                    Text(player.detailText)
+                    Text(playerDetail(player))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -243,21 +243,15 @@ private struct TradeOfferRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
-    private func playerLink(for player: TradeAsset) -> some View {
-        if let url = player.profileURL {
-            Link(destination: url) {
-                Text(player.name)
-                    .font(.subheadline)
-                    .lineLimit(1)
-            }
-            .buttonStyle(.plain)
-            .tint(.primary)
-        } else {
-            Text(player.name)
-                .font(.subheadline)
-                .lineLimit(1)
-        }
+    /// A player the offer only includes to square up the player counts is
+    /// labelled, so it is obvious which names are sweeteners rather than targets.
+    /// The label takes the place of the projections, which would otherwise push
+    /// it past the end of the line.
+    private func playerDetail(_ player: TradeAsset) -> String {
+        guard offer.throwInIDs.contains(player.id) else { return player.detailText }
+        let teamLine = "\(player.position) - \(player.team)"
+            .trimmingCharacters(in: CharacterSet(charactersIn: " -"))
+        return teamLine.isEmpty ? "throw-in" : "\(teamLine) · throw-in"
     }
 }
 
