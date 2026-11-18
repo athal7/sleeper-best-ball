@@ -507,3 +507,36 @@ private func makeTeam(rosterID: Int, name: String, projected: Double) -> TeamSco
         #expect(offers.isEmpty)
     }
 }
+
+@Suite struct WaiverSlotTests {
+    @Test func waiverSlotsComeFromTheUsersRosterNotTheLeagueLineup() {
+        // The league starts two backs and a flex; the user's roster carries one
+        // back, two receivers and a bench body. The web scores waivers with the
+        // roster set, so the flex slot must not exist here.
+        let roster = ["RB", "WR", "WR", "BN"].compactMap { $0 == "BN" ? nil : $0 }
+        let slots = LineupSlots.rosterSlots(positions: roster)
+        #expect(slots.map(\.label) == ["RB1", "WR1", "WR2"])
+        #expect(slots.allSatisfy { $0.eligible == [$0.position] })
+    }
+
+    @Test func rosterSlotsStartEveryRosteredPlayer() {
+        // With one slot per rostered player, a bench receiver the league lineup
+        // would have benched still scores.
+        let scanner = WaiverScanner()
+        let points = ["rb1": 10.0, "wr1": 9.0, "wr2": 30.0]
+        let positions = ["rb1": "RB", "wr1": "WR", "wr2": "WR"]
+        let starting = LineupSlots.slots(for: ["RB", "WR", "BN", "BN"])
+        let roster = LineupSlots.rosterSlots(positions: ["RB", "WR", "WR"])
+        #expect(scanner.lineupTotal(points, positions, starting) == 40)
+        #expect(scanner.lineupTotal(points, positions, roster) == 49)
+    }
+
+    @Test func aPositionTheUserDoesNotRosterCannotBeAdded() {
+        // `build_waiver_pool` filters to `settings.relevant_positions`, which
+        // with roster slots is only what the user already carries.
+        let slots = LineupSlots.rosterSlots(positions: ["QB", "RB", "WR"])
+        let relevant = Set(slots.flatMap(\.eligible))
+        #expect(relevant == ["QB", "RB", "WR"])
+        #expect(!relevant.contains("K"))
+    }
+}

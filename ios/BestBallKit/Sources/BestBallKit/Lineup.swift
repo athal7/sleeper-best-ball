@@ -50,6 +50,28 @@ public enum LineupSlots {
         }
         return slots
     }
+
+    /// The slot set the Streamlit app actually scores waivers and trades with.
+    ///
+    /// `DraftSettings.from_draft` reads `slots_qb`-style keys that real Sleeper
+    /// leagues do not have, so the web path falls through to
+    /// `DraftSettings.from_actual_roster`: one slot per player the *user's own*
+    /// roster carries, each slot eligible only for that position. Every rostered
+    /// player therefore scores, bench included, and no flex slot exists. Rebuild
+    /// the same set here so the two apps agree to the decimal.
+    public static func rosterSlots(positions: [String]) -> [Slot] {
+        var counts: [String: Int] = [:]
+        var order: [String] = []
+        for position in positions {
+            if counts[position] == nil { order.append(position) }
+            counts[position, default: 0] += 1
+        }
+        return order.flatMap { position in
+            (0..<(counts[position] ?? 0)).map { index in
+                Slot(label: "\(position)\(index + 1)", position: position, eligible: [position])
+            }
+        }
+    }
 }
 
 // MARK: - Rostered players

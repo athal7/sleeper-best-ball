@@ -13,7 +13,15 @@ struct TradesView: View {
     var body: some View {
         NavigationStack {
             List {
-                if model.trades.isEmpty, model.isScanningTrades || !model.hasScannedTrades {
+                if model.leagues.isEmpty, !model.isLoading {
+                    Section {
+                        ContentUnavailableView(
+                            "No leagues to analyze",
+                            systemImage: "person.3",
+                            description: Text("Trades are scored per league, and no league loaded for this season.")
+                        )
+                    }
+                } else if model.trades.isEmpty, model.isScanningTrades || !model.hasScannedTrades {
                     // Analyzing is not the same as "no trades": show work in
                     // progress until a scan has actually finished.
                     Section {
@@ -81,7 +89,10 @@ struct TradesView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task {
+            // Keyed on the league count: opening this sheet before the leagues
+            // have loaded used to bail out of the scan and leave the spinner
+            // running forever, since nothing else asked for one.
+            .task(id: model.leagues.count) {
                 if !model.hasScannedTrades, !model.isScanningTrades {
                     await model.refreshTrades()
                 }

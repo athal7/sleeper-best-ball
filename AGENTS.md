@@ -82,12 +82,16 @@ confirming it actually archived and uploaded.
 - Trade and waiver numbers are user-visible and mirror the Python app. When the two
   disagree the Python implementation in `streamlit_app.py` is the reference, and
   `tests/test_trade.py` / the waiver tests are the expectations to match.
-- Trade scoring slots are a quirk worth preserving: `DraftSettings.from_draft` reads
-  `slots_qb`-style keys real Sleeper leagues do not have, so the web falls back to
-  `from_actual_roster` — one slot per player on *your* roster, each eligible only for
-  that player's own position, bench and flex included. `TradeBoard.rosterSlots`
-  rebuilds exactly that. Do not "fix" it to use `roster_positions`: iOS then stops
-  matching the web (verified against a live league: 3 offers, identical uplifts).
+- Trade and waiver scoring slots are a quirk worth preserving: `DraftSettings.from_draft`
+  reads `slots_qb`-style keys real Sleeper leagues do not have, so the web falls back
+  to `from_actual_roster` — one slot per player on *your* roster, each eligible only
+  for that player's own position, bench and flex included. `LineupSlots.rosterSlots`
+  rebuilds exactly that, and both scanners use it. Do not "fix" it to use
+  `roster_positions`: iOS then stops matching the web. Verified against live leagues
+  with a Python reference of the web path — identical offers, adds, drops and uplifts.
+- A screen that kicks off its own scan must key its `.task` on the data it needs
+  (`TradesView` uses `model.leagues.count`). Opening the sheet before the leagues
+  have loaded otherwise bails out of the scan and leaves the spinner running forever.
 - Live Activities are gated on `RosterPlayer.isLive`: a league only gets an activity
   while at least one of the user's players is in a game that is in progress.
 - The tip jar (`ios/BestBall/TipJarView.swift`) uses consumable products named

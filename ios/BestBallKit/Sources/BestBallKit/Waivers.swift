@@ -163,8 +163,14 @@ public struct WaiverScanner: Sendable {
               let myRoster = rosters.first(where: { $0.ownerID == userID })?.players,
               !myRoster.isEmpty else { return [] }
 
-        let slots = LineupSlots.slots(for: detail.rosterPositions)
-        guard slots.contains(where: { !$0.isBench }) else { return [] }
+        let rosterPositionList = myRoster.compactMap { directory[$0]?.position }
+        guard !rosterPositionList.isEmpty else { return [] }
+
+        // Same slot set as the web guide: one slot per player on the user's own
+        // roster, not the league's starting lineup. See
+        // `LineupSlots.rosterSlots` for why the Streamlit app ends up there.
+        let slots = LineupSlots.rosterSlots(positions: rosterPositionList)
+        let scoredPositions = Set(slots.flatMap(\.eligible))
 
         let weeks = (week...max(week, Self.seasonEndWeek(detail.settings))).filter {
             $0 <= 18 && projections[$0] != nil
@@ -183,8 +189,13 @@ public struct WaiverScanner: Sendable {
         }
         guard !positions.isEmpty else { return [] }
 
-        let playoffStart = detail.settings.playoffWeekStart ?? 15
-        func weight(_ week: Int) -> Double { week >= playoffStart ? 1.5 : 1.0 }
+        // The web only applies playoff weighting when the league actually sets
+        // a playoff week; without one every week counts 1x.
+        let playoffStart = detail.settings.playoffWeekStart
+        func weight(_ week: Int) -> Double {
+            guard let playoffStart, playoffStart > 0 else { return 1.0 }
+            return week >= playoffStart ? 1.5 : 1.0
+        }
         let totalWeight = weeks.reduce(0.0) { $0 + weight($1) }
 
         var weekly: [Int: [String: Double]] = [:]
@@ -196,9 +207,9 @@ public struct WaiverScanner: Sendable {
         }
         let baseline = weekly.mapValues { lineupTotal($0, positions, slots) }
 
-        // Only positions this league can actually start; a kicker in a league
-        // with no K slot is noise, however well he projects.
-        let startable = Set(slots.filter { !$0.isBench }.flatMap(\.eligible))
+        // The web filters its pool to `settings.relevant_positions`, which with
+        // roster slots is exactly the set of positions the user rosters — a
+        // kicker when you carry no kicker can't help any lineup.
 
         // Free agents: everyone with a projection who nobody in this league owns.
         let rostered = Set(rosters.flatMap(\.players))
@@ -206,7 +217,7 @@ public struct WaiverScanner: Sendable {
         for (playerID, player) in directory {
             guard !rostered.contains(playerID),
                   Self.waiverPositions.contains(player.position),
-                  startable.contains(player.position) else { continue }
+                  scoredPositions.contains(player.position) else { continue }
             var scored: [Int: Double] = [:]
             var total = 0.0
             for week in weeks {

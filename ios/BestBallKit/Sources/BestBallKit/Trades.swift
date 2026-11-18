@@ -130,26 +130,10 @@ public struct TradeBoard: Identifiable, Sendable {
         Array(Set(teams.flatMap { $0.assets.map(\.position) })).sorted()
     }
 
-    /// The slot set the Streamlit app scores trades with.
-    ///
-    /// `DraftSettings.from_draft` reads `slots_qb`-style keys that real Sleeper
-    /// leagues do not have, so the web path falls through to
-    /// `DraftSettings.from_actual_roster`: one slot per player the *user's own*
-    /// roster carries, each slot eligible only for that position. Every rostered
-    /// player therefore scores, bench included, and no flex slot exists. Rebuild
-    /// the same set here so the two apps agree to the decimal.
+    /// The slot set the Streamlit app scores trades with — see
+    /// `LineupSlots.rosterSlots`.
     public static func rosterSlots(for assets: [TradeAsset]) -> [Slot] {
-        var counts: [String: Int] = [:]
-        var order: [String] = []
-        for asset in assets {
-            if counts[asset.position] == nil { order.append(asset.position) }
-            counts[asset.position, default: 0] += 1
-        }
-        return order.flatMap { position in
-            (0..<(counts[position] ?? 0)).map { _ in
-                Slot(label: position, position: position, eligible: [position])
-            }
-        }
+        LineupSlots.rosterSlots(positions: assets.map(\.position))
     }
 
     public func team(_ teamID: String) -> TradeTeam? {
