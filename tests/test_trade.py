@@ -449,3 +449,62 @@ def test_compute_trade_suggestions_unreachable_need_returns_nothing():
         my_position='TE').empty
     assert compute_trade_suggestions(
         pd.DataFrame(), partner, weekly_points, settings).empty
+
+
+def test_trades_use_the_league_lineup_not_the_users_own_roster_shape():
+    """Mirror of the iOS test `leagueLineupFindsDealsTheRosterSlotFallbackMisses`.
+
+    I carry no tight end, so under `from_actual_roster` slots a tight end scores
+    nothing for me and the partner's two of them are invisible. Against the
+    league's real lineup my empty TE slot makes their spare one valuable and I
+    have a bench receiver they can start.
+    """
+    def roster(rows):
+        return pd.DataFrame({
+            'position': [pos for _, pos, _, _ in rows],
+            'first_name': [name for _, _, name, _ in rows],
+            'last_name': [''] * len(rows),
+            'team': ['NFL'] * len(rows),
+        }, index=[pid for pid, _, _, _ in rows])
+
+    my_roster = roster([
+        ('qb1', 'QB', 'Mine QB', 20.0), ('rb1', 'RB', 'Mine RB1', 15.0),
+        ('rb2', 'RB', 'Mine RB2', 10.0), ('wr1', 'WR', 'Mine WR1', 20.0),
+        ('wr2', 'WR', 'Mine WR2', 18.0), ('wr3', 'WR', 'Mine WR3', 12.0),
+    ])
+    partner = roster([
+        ('qb2', 'QB', 'Their QB', 18.0), ('rb3', 'RB', 'Their RB1', 22.0),
+        ('rb4', 'RB', 'Their RB2', 19.0), ('wr4', 'WR', 'Their WR1', 9.0),
+        ('wr5', 'WR', 'Their WR2', 8.0), ('te1', 'TE', 'Their TE1', 15.0),
+        ('te2', 'TE', 'Their TE2', 12.0),
+    ])
+    weekly_points = pd.DataFrame({1: {
+        'qb1': 20.0, 'rb1': 15.0, 'rb2': 10.0, 'wr1': 20.0, 'wr2': 18.0, 'wr3': 12.0,
+        'qb2': 18.0, 'rb3': 22.0, 'rb4': 19.0, 'wr4': 9.0, 'wr5': 8.0,
+        'te1': 15.0, 'te2': 12.0,
+    }})
+
+    lineup = DraftSettings.from_roster_positions(['QB', 'RB', 'RB', 'WR', 'WR', 'TE'], teams=2)
+    offers = compute_trade_suggestions(
+        my_roster, partner, weekly_points, lineup, partner_name='Partner')
+    gives_wr3 = offers[offers['give_players'].apply(
+        lambda players: any(p['id'] == 'wr3' for p in players))]
+    assert not gives_wr3.empty
+    assert gives_wr3['receive_players'].apply(
+        lambda players: any(p['position'] == 'TE' for p in players)).any()
+    assert (gives_wr3['my_uplift'] > 0).all()
+    assert (gives_wr3['partner_uplift'] > 0).all()
+
+    # What `from_actual_roster` produces for that roster: no TE slot at all, so
+    # the same deal cannot help me and nothing is offered.
+    fallback = DraftSettings(teams=2, slots={'QB': 1, 'RB': 2, 'WR': 3})
+    assert compute_trade_suggestions(
+        my_roster, partner, weekly_points, fallback, partner_name='Partner').empty
+
+
+def test_from_roster_positions_keeps_starters_and_drops_bench():
+    settings = DraftSettings.from_roster_positions(
+        ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'BN', 'BN', 'BN', 'IR'], teams=12)
+
+    assert settings.slots == {'QB': 1, 'RB': 2, 'WR': 2, 'TE': 1, 'FLEX': 1}
+    assert settings.teams == 12

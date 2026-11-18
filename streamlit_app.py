@@ -260,6 +260,16 @@ class DraftSettings:
         'slots_k': 'K', 'slots_def': 'DEF',
     }
 
+    # Starting slots, in the order `LineupSlots.slots(for:)` expands them. Bench
+    # is absent on purpose: bench players score nothing for their own team and
+    # are what makes a trade worth doing.
+    SLOT_ORDER = [
+        ('QB', 'QB', ['QB']), ('RB', 'RB', ['RB']), ('WR', 'WR', ['WR']),
+        ('TE', 'TE', ['TE']), ('FLEX', 'FX', ['RB', 'WR', 'TE']),
+        ('SUPER_FLEX', 'SFX', ['QB', 'RB', 'WR', 'TE']),
+        ('K', 'K', ['K']), ('DEF', 'DEF', ['DEF']),
+    ]
+
     @classmethod
     def from_draft(cls, draft: dict) -> 'DraftSettings':
         settings = draft['settings']
@@ -283,6 +293,22 @@ class DraftSettings:
         teams = len(rosters)
         slots = {pos: max(1, round(count / teams)) for pos, count in pos_counts.items()}
         return cls(teams=teams, slots=slots)
+
+    @classmethod
+    def from_roster_positions(cls, roster_positions: list[str], teams: int) -> 'DraftSettings':
+        """The league's real starting lineup, e.g. `['QB', 'RB', 'RB', 'WR', ...]`.
+
+        Bench slots are dropped and unknown slots ignored, so only players who
+        would actually start compete for points. This is the slot set trades are
+        scored with; `LineupSlots.slots(for:)` in `ios/BestBallKit` builds the
+        same set from the same input.
+        """
+        counts: dict[str, int] = {}
+        for label, _, _ in cls.SLOT_ORDER:
+            count = sum(1 for position in roster_positions if position == label)
+            if count:
+                counts[label] = count
+        return cls(teams=teams, slots=counts)
 
     @classmethod
     def from_actual_roster(cls, rosters: pd.DataFrame, roster_id: str) -> 'DraftSettings':
@@ -1880,10 +1906,20 @@ def _trade_suggestions_league_fragment(league_id: str, user_id: str, season: int
         return
 
     league = Data.get_league(int(league_id))
-    try:
-        settings = DraftSettings.from_draft(league.get_league())
-    except (KeyError, AttributeError):
-        settings = DraftSettings.from_actual_roster(waiver_data.rosters, user_roster_id)
+    # Trades are scored against the league's real starting lineup. The old
+    # `from_actual_roster` fallback gives every rostered player a slot of his own
+    # position, which makes a swap nearly zero-sum: only a team whose surplus
+    # happened to fit that template could show a mutually profitable package, so
+    # a whole league could produce a single trade partner.
+    roster_positions = league.get_league().get('roster_positions') or []
+    if roster_positions:
+        settings = DraftSettings.from_roster_positions(
+            roster_positions, teams=len(waiver_data.rosters))
+    else:
+        try:
+            settings = DraftSettings.from_draft(league.get_league())
+        except (KeyError, AttributeError):
+            settings = DraftSettings.from_actual_roster(waiver_data.rosters, user_roster_id)
 
     scoring = fetch_draft_scoring(str(league_id))
     bye_weeks = Data.get_bye_weeks(season)
