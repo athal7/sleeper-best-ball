@@ -38,8 +38,9 @@ jobs:
           working-directory: core/bestball-py
           args: --release --out dist
       # The wheel installs before the app's other requirements so pytest
-      # exercises the same engine build Streamlit deploys.
-      - run: pip install dist/*.whl
+      # exercises the same engine build Streamlit deploys. maturin writes into
+      # `dist` relative to its working directory, not the checkout root.
+      - run: pip install core/bestball-py/dist/*.whl
       - run: pip install -r requirements.txt
       - run: pip install pytest
       - run: python -m pytest tests -v --ignore=tests/test_app.py
