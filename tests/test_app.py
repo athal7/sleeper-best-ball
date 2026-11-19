@@ -65,6 +65,37 @@ def test_render_waiver_guide_renders_multiple_leagues(monkeypatch):
     assert '## League Two' in markdown_calls
 
 
+def test_week_follows_sleeper_when_the_stored_week_is_stale():
+    import streamlit_app
+
+    live_week = streamlit_app._sleeper_week(streamlit_app.get_sport_state('nfl'))
+    at = _app()
+    at.query_params['username'] = user
+    at.session_state['week'] = 1
+    at.run()
+    assert at.number_input[0].value == live_week
+
+
+def test_a_picked_week_is_kept():
+    at = _app()
+    at.query_params['username'] = user
+    at.session_state['week'] = 3
+    at.session_state['week_pinned'] = True
+    at.run()
+    assert at.number_input[0].value == 3
+
+
+def test_sleeper_week_falls_back_to_one_outside_the_regular_season():
+    import streamlit_app
+
+    assert streamlit_app._sleeper_week(
+        {'season_type': 'regular', 'display_week': 12}) == 12
+    assert streamlit_app._sleeper_week(
+        {'season_type': 'off', 'display_week': 12}) == 1
+    assert streamlit_app._sleeper_week(
+        {'season_type': 'regular', 'display_week': 0}) == 1
+
+
 def test_by_league_query_param():
     at = _app()
     at.query_params['league'] = league_id

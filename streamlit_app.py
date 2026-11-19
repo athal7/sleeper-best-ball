@@ -999,6 +999,32 @@ class DraftData:
         return sleeper.Drafts(draft_id).get_all_picks()
 
 
+def _sleeper_week(state: dict) -> int:
+    is_regular_season = state['season_type'] == 'regular'
+    display_week = int(state['display_week'])
+    return display_week if is_regular_season and display_week > 0 else 1
+
+
+def current_week(state: Optional[dict] = None) -> int:
+    """Sleeper's week, and the week this session should be showing.
+
+    The week moves on by itself once the slate is over, so it is followed unless
+    the user picked another one: a week stored before the rollover is last
+    week's news, while a week picked ahead of time is still deliberate.
+    """
+    state = state or get_sport_state('nfl')
+    week = _sleeper_week(state)
+    if not st.session_state.get('week_pinned'):
+        stored = st.session_state.get('week') or week
+        st.session_state['week'] = max(int(stored), week)
+    return week
+
+
+def pin_week(sleeper_week: int) -> None:
+    """Remember the week on screen was picked by hand (or hand it back)."""
+    st.session_state['week_pinned'] = st.session_state['week'] != sleeper_week
+
+
 class Context:
     season: int
     week: int
@@ -1009,10 +1035,8 @@ class Context:
         current = get_sport_state('nfl')
         self.username = st.query_params.get('username')
         self.season = int(current['league_season'])
-        is_regular_season = current['season_type'] == 'regular'
-        display_week = int(current['display_week'])
-        self.week = st.session_state.get(
-            'week') or (display_week if is_regular_season and display_week > 0 else 1)
+        self.current_week = current_week(current)
+        self.week = int(st.session_state['week'])
         self.leagues = []
         for league_id in league_ids:
             data = Data(league_id=league_id, context=self)
@@ -2119,10 +2143,10 @@ def main():
         on_change=lambda: st.query_params.update({'mode': st.session_state.app_mode or mode_options[0]}))
     if mode not in mode_options:
         mode = mode_default
-    week_val = st.session_state.get('week', 1)
     if mode == "Draft Assistant":
         render_draft_assistant(username)
         return
+    week_val = current_week()
     if mode == "Waiver Guide":
         render_waiver_guide(username, int(week_val))
         return
@@ -2132,8 +2156,9 @@ def main():
 
     context = Context(active_leagues)
 
-    st.number_input("Week", min_value=1, max_value=18,
-                    key='week', value=context.week)
+    st.number_input("Week", min_value=1, max_value=18, key='week',
+                    value=context.week, on_change=pin_week,
+                    args=(context.current_week,))
 
     for league in context.leagues:
         st.markdown(f"## {league.name}")

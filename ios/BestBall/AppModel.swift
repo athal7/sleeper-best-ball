@@ -51,6 +51,10 @@ final class AppModel: ObservableObject {
     private let liveActivities = LiveActivityController.shared
     private var account: SleeperAccount?
     private var hasStarted = false
+    /// True once you tap a week arrow onto a week that isn't the current one.
+    /// From then on the screen stays where you put it; arrowing back to the
+    /// current week hands control back to Sleeper.
+    private var hasChosenWeek = false
 
     /// Set when the user turns the Live Activities off. The mute is scoped to the
     /// week it was set in, so next week's kickoff starts tracking again on its
@@ -65,6 +69,9 @@ final class AppModel: ObservableObject {
     }
 
     var trackedLeagueCount: Int { liveActivities.trackedLeagueIDs.count }
+
+    /// Sleeper's own week, which moves on by itself once the slate is over.
+    private var currentWeek: Int { state?.defaultWeek ?? week }
 
     /// False when Live Activities are switched off for the app in Settings, which
     /// is the one reason a toggle here cannot do anything.
@@ -98,9 +105,10 @@ final class AppModel: ObservableObject {
         username = saved
         isConnected = true
         await WaiverNotifier.requestAuthorization()
-        // Come back to the week the Live Activities are showing rather than
-        // jumping to Sleeper's current week.
-        await loadAll(week: SharedStore.loadTrackedWeek() ?? state?.defaultWeek ?? 1)
+        // Open on whichever is later, the week you were last looking at or
+        // Sleeper's current one: a week saved before the rollover is last week's
+        // news, while a week you parked on ahead of time is still what you want.
+        await loadAll(week: max(SharedStore.loadTrackedWeek() ?? currentWeek, currentWeek))
 
         // A remembered name that no longer loads shouldn't strand the user on an
         // empty scores screen: show setup with the name still filled in.
@@ -126,7 +134,7 @@ final class AppModel: ObservableObject {
         username = name
         SharedStore.saveUsername(name)
         isConnected = true
-        await loadAll(week: state?.defaultWeek ?? SharedStore.loadTrackedWeek() ?? 1)
+        await loadAll(week: max(SharedStore.loadTrackedWeek() ?? currentWeek, currentWeek))
 
         if let error = errorMessage, leagueWeeks.isEmpty {
             // Connecting failed outright: stay on setup so the user can fix the
@@ -355,16 +363,23 @@ final class AppModel: ObservableObject {
         hasScannedTrades = true
     }
 
+    /// The week ends on its own, so refreshing follows it. The state is fetched
+    /// first because the decision can't be made with the week saved yesterday.
     func refresh() async {
-        await loadAll(week: week)
+        if !hasChosenWeek, let latest = try? await service.sportState() {
+            state = latest
+        }
+        await loadAll(week: hasChosenWeek ? week : max(week, currentWeek))
     }
 
     func showPreviousWeek() async {
         await loadAll(week: week - 1)
+        hasChosenWeek = week != currentWeek
     }
 
     func showNextWeek() async {
         await loadAll(week: week + 1)
+        hasChosenWeek = week != currentWeek
     }
 
     // MARK: Helpers

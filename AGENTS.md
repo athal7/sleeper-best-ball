@@ -153,6 +153,13 @@ confirming it actually archived and uploaded.
 - A screen that kicks off its own scan must key its `.task` on the data it needs
   (`TradesView` uses `model.leagues.count`). Opening the sheet before the leagues
   have loaded otherwise bails out of the scan and leaves the spinner running forever.
+- The week on screen follows Sleeper rather than staying where it was: both
+  surfaces open on the later of the saved week and `defaultWeek`, and a refresh
+  in the same session moves forward when the week rolls over. Only an arrow tap
+  (iOS) or a week edit (web) onto a different week pins the screen, and arrowing
+  back to the current week hands control to Sleeper again. This is why the
+  opened week is `max(saved, current)`: a week saved before the rollover is last
+  week's news, while a week parked on ahead of time is still deliberate.
 - Live Activities are gated on `RosterPlayer.isLive` and start themselves:
   `syncLiveActivities` runs on every load, starts a card for each league with a
   player on the field, and ends the cards whose league dropped out — so nothing
