@@ -124,10 +124,11 @@ confirming it actually archived and uploaded.
   per platform on an `engine-v*` tag; pin the manylinux asset in
   `requirements.txt` before deploying. Update the pin whenever engine behaviour
   changes, or the web will keep running the old numbers.
-- `core/scripts/parity_lineup.py` and `parity_uplift.py` compare the Rust
-  engine with the Python path on randomized leagues; they must report zero
-  mismatches after any change to either side
-  (`cargo build --release && .venv/bin/python core/scripts/parity_uplift.py`).
+- Fidelity is pinned by shared fixtures, not by comparing two implementations.
+  Every case in `core/src/lineup.rs` and `core/src/uplift.rs` has a partner of
+  the same name in `tests/test_engine.py` asserting the identical number through
+  the Python adapter. Add the pytest case whenever you add a Rust one; a
+  behaviour change means editing both, which is the point.
 - Change one surface, change the other: the trade rule also has a mirrored pair
   of tests, `leagueLineupFindsDealsTheRosterSlotFallbackMisses` in
   `BestBallKitTests` and
