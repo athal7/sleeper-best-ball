@@ -241,27 +241,32 @@ public enum BestBallEngine {
     /// one the highest-ranked unassigned eligible player. With `by` set to
     /// `.optimistic` this is the projected lineup; `.points` reproduces the
     /// current Sleeper lineup.
+    ///
+    /// The selection itself runs in the shared engine (`core/src/lineup.rs`) so
+    /// the app and the web cannot disagree about who starts. The slot table
+    /// stays here because the waiver and trade searches need eligibility
+    /// locally while they explore packages.
     public static func assignSlots(
         _ players: [RosterPlayer],
         slots: [Slot],
         by keyPath: KeyPath<RosterPlayer, Double>
     ) -> [String: String] {
-        let ordered = players.sorted {
-            let lhs = $0[keyPath: keyPath]
-            let rhs = $1[keyPath: keyPath]
-            if lhs == rhs { return $0.id < $1.id }
-            return lhs > rhs
-        }
-        var remaining = ordered
-        var assignments: [String: String] = [:]
-        for slot in slots {
-            guard let index = remaining.firstIndex(where: { slot.eligible.contains($0.position) }) else {
-                continue
+        guard !players.isEmpty, !slots.isEmpty else { return [:] }
+        // Id order, so players on equal scores break their tie the same way in
+        // the engine's stable ranking as they did here.
+        let request = players
+            .sorted { $0.id < $1.id }
+            .map { player in
+                EngineBridge.Player(
+                    id: player.id,
+                    position: player.position,
+                    score: player[keyPath: keyPath]
+                )
             }
-            assignments[remaining[index].id] = slot.label
-            remaining.remove(at: index)
-        }
-        return assignments
+        return EngineBridge.lineupAssignment(
+            slotPositions: slots.map(\.position),
+            players: request
+        )
     }
 
     /// Returns players with both their best-ball slot and their current slot

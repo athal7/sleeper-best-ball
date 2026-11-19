@@ -153,6 +153,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A2B3C4D5E6F00000000000E /* Build configuration list for PBXNativeTarget "BestBall" */;
 			buildPhases = (
+				1A2B3C4D5E6F000000000030 /* Build engine */,
 				1A2B3C4D5E6F000000000016 /* Sources */,
 				1A2B3C4D5E6F000000000018 /* Frameworks */,
 				1A2B3C4D5E6F00000000001A /* Resources */,
@@ -175,6 +176,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1A2B3C4D5E6F00000000000F /* Build configuration list for PBXNativeTarget "BestBallWidget" */;
 			buildPhases = (
+				1A2B3C4D5E6F000000000031 /* Build engine */,
 				1A2B3C4D5E6F000000000017 /* Sources */,
 				1A2B3C4D5E6F000000000019 /* Frameworks */,
 				1A2B3C4D5E6F00000000001B /* Resources */,
@@ -230,6 +232,41 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		1A2B3C4D5E6F000000000030 /* Build engine */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build engine";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../core/scripts/build-ios.sh\" xcode\n";
+			showEnvVarsInLog = 0;
+		};
+		1A2B3C4D5E6F000000000031 /* Build engine */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build engine";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../core/scripts/build-ios.sh\" xcode\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
 		1A2B3C4D5E6F00000000001A /* Resources */ = {
@@ -328,7 +365,7 @@
 				DEVELOPMENT_TEAM = MH5EJ3Q33X;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -395,7 +432,7 @@
 				DEVELOPMENT_TEAM = MH5EJ3Q33X;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;

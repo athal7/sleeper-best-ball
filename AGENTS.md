@@ -158,3 +158,32 @@ confirming it actually archived and uploaded.
   `<bundle id>.tip.small|medium|large`. They must exist in App Store Connect for a
   paid team before any purchase works; a sideloaded build shows "unavailable", which
   is expected rather than a bug.
+
+## Building the iOS app against the engine
+
+- `core/scripts/build-ios.sh` builds the Rust engine into
+  `ios/.engine/libbestball_engine.a`; `BestBallKit` links it and talks to it
+  through `EngineBridge.swift` (JSON over the C ABI in `core/src/abi.rs`).
+  There is no published framework: Xcode runs the script from a "Build engine"
+  phase before Sources on both `BestBall` and `BestBallWidget`, so the archive
+  always matches the SDK being built.
+- That phase needs `ENABLE_USER_SCRIPT_SANDBOXING = NO`: cargo writes its own
+  `core/target` tree, whose file set cannot be declared as outputs. Do not turn
+  the sandbox back on without moving the Rust build outside the phase.
+- `SDKROOT` must be a real SDK path when cargo runs. Xcode exports it as a name
+  ("iphonesimulator"), which clang resolves relative to the working directory
+  and fails on; the script converts it with `xcrun --show-sdk-path`.
+- The simulator archive is lipo'd for arm64 + x86_64 (`generic/platform=iOS
+  Simulator` builds both). Device and simulator archives have the same file
+  name, so whichever ran last wins — that is why `swift test` needs
+  `core/scripts/build-ios.sh host` first:
+  `core/scripts/build-ios.sh host && cd ios/BestBallKit && swift test`.
+- Command-line app builds use the shared scheme:
+  `xcodebuild -project ios/BestBall.xcodeproj -scheme BestBall -destination
+  'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build`. Building with
+  `-target` instead skips SwiftPM's module-map generation and fails on the
+  `CEngine` target.
+- `BestBallEngine.assignSlots` (and therefore `lineup` and `totals`) delegates to
+  the engine, so who starts is decided once for both apps. The slot table stays
+  in `Lineup.swift` because the waiver and trade searches walk eligibility
+  locally while they explore packages; only the scoring is shared.

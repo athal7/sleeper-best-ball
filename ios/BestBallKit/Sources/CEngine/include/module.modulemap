@@ -1,0 +1,4 @@
+module CEngine {
+    header "bestball_engine.h"
+    export *
+}
