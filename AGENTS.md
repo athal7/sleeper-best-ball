@@ -144,16 +144,23 @@ confirming it actually archived and uploaded.
 - Players are tappable everywhere they appear (`PlayerNameButton` in
   `ios/BestBall/PlayerLink.swift`). Sleeper publishes no per-player app link: its
   universal links cover only `/topics/`, `/channels/`, `/topic/`, `/message/`, and
-  the `sleeper://` scheme has no documented player route, so the app opens on its
-  home screen. The button is a single tap with no chooser — it opens `sleeper://`
-  and, only if the app will not take the URL, falls through to the web profile.
-  Keep `contentShape(Rectangle())` on the label: without it the hit area is the
-  glyphs alone and the name reads as a dead label.
+  `sleeper://` has no player route, so opening the bare scheme resumes the app on
+  whatever screen it last showed (a league matchup, in practice). The tap goes
+  straight to the web profile at `sleeper.com/nfl/players/<slug>-<id>` instead —
+  the slug is decorative, Sleeper routes on the id — with no `sleeper://` attempt
+  in front of it. Keep `contentShape(Rectangle())` on the label: without it the
+  hit area is the glyphs alone and the name reads as a dead label.
 - A screen that kicks off its own scan must key its `.task` on the data it needs
   (`TradesView` uses `model.leagues.count`). Opening the sheet before the leagues
   have loaded otherwise bails out of the scan and leaves the spinner running forever.
-- Live Activities are gated on `RosterPlayer.isLive`: a league only gets an activity
-  while at least one of the user's players is in a game that is in progress.
+- Live Activities are gated on `RosterPlayer.isLive` and start themselves:
+  `syncLiveActivities` runs on every load, starts a card for each league with a
+  player on the field, and ends the cards whose league dropped out — so nothing
+  waits for a tap at kickoff, and a card never outlives its game. The toggle only
+  writes a mute, scoped to the week it was set in (`liveActivityMutedWeekKey`), so
+  the next week's games come back on their own. `BackgroundRefresh` deliberately
+  does not check that mute: it is also what starts tracking and posts waiver
+  notifications.
 - The tip jar (`ios/BestBall/TipJarView.swift`) uses consumable products named
   `<bundle id>.tip.small|medium|large`. They must exist in App Store Connect for a
   paid team before any purchase works; a sideloaded build shows "unavailable", which

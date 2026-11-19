@@ -203,15 +203,24 @@ struct MatchupsView: View {
                 }
             }
             .tint(.green)
+            .disabled(!model.liveActivitiesAuthorized)
         } footer: {
-            Text("Keeps this week's scores on your Lock Screen and in the Dynamic Island, one card per league. Updates whenever you pull to refresh here — no server involved.")
+            Text(liveActivityFooter)
         }
     }
 
     private var liveActivityDetail: String {
-        guard model.isTrackingLiveActivity else { return "Off" }
+        guard model.liveActivitiesAuthorized else { return "Off in iOS Settings" }
+        guard model.isTrackingLiveActivity else { return "Starts when a game is on" }
         let count = model.trackedLeagueCount
         return count == 1 ? "Tracking 1 league" : "Tracking \(count) leagues"
+    }
+
+    private var liveActivityFooter: String {
+        guard model.liveActivitiesAuthorized else {
+            return "Live Activities are turned off for Best Ball in Settings, so no card can appear until you allow them there."
+        }
+        return "While you have a player in a game, this week's scores sit on your Lock Screen and in the Dynamic Island, one card per league — it turns itself on at kickoff and goes away once the week's games are done. Scores refresh when the app does, including the background refresh iOS schedules; no server is involved."
     }
 
     private var liveActivityBinding: Binding<Bool> {

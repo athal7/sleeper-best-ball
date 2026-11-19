@@ -52,9 +52,11 @@ final class AppModel: ObservableObject {
     private var account: SleeperAccount?
     private var hasStarted = false
 
-    /// Set when the user turns the Live Activities off so refreshes don't bring
-    /// them back until they ask for them again.
+    /// Set when the user turns the Live Activities off. The mute is scoped to the
+    /// week it was set in, so next week's kickoff starts tracking again on its
+    /// own — the toggle is a veto on this week's games, not a setting.
     static let liveActivityMutedKey = "bestball.liveActivityMuted"
+    static let liveActivityMutedWeekKey = "bestball.liveActivityMutedWeek"
 
     static let weeks = 1...18
 
@@ -63,6 +65,10 @@ final class AppModel: ObservableObject {
     }
 
     var trackedLeagueCount: Int { liveActivities.trackedLeagueIDs.count }
+
+    /// False when Live Activities are switched off for the app in Settings, which
+    /// is the one reason a toggle here cannot do anything.
+    var liveActivitiesAuthorized: Bool { liveActivities.isAuthorized }
 
     /// Leagues that actually have something to show this week.
     var visibleLeagues: [LeagueWeek] {
@@ -167,24 +173,37 @@ final class AppModel: ObservableObject {
     /// Starts or stops tracking for every league at once.
     func toggleLiveActivity() async {
         if liveActivities.isTracking {
+            muteLiveActivity()
             await liveActivities.end()
-            UserDefaults.standard.set(true, forKey: Self.liveActivityMutedKey)
             isTrackingLiveActivity = false
         } else {
-            UserDefaults.standard.set(false, forKey: Self.liveActivityMutedKey)
+            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedKey)
+            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedWeekKey)
             await syncLiveActivities(from: leagueWeeks)
-            BackgroundRefresh.schedule()
+            if isTrackingLiveActivity { BackgroundRefresh.schedule() }
         }
     }
 
     /// One Live Activity per league, all tracking the week on screen.
+    ///
+    /// This is the only place activities are started or ended, and it runs on
+    /// every load, so a game going live turns tracking on by itself and the last
+    /// game of the week turns it off again. The toggle only records a veto for the
+    /// week on screen.
     private func syncLiveActivities(from loaded: [LeagueWeek]) async {
-        guard !UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey) else { return }
         guard !loaded.isEmpty else { return }
+
+        let targetWeek = loaded[0].week
+        guard !isLiveActivityMuted(for: targetWeek) else {
+            isTrackingLiveActivity = liveActivities.isTracking
+            return
+        }
 
         // Only leagues with a player on the field right now get an activity, so
         // the Lock Screen isn't holding a card for a league that has nothing
-        // live (all games done, or none started yet).
+        // live (all games done, or none started yet). The controller ends any
+        // card whose league dropped out of this list, so a card never outlives
+        // the game that justified it.
         let liveNow = loaded.filter { week in
             week.userTeam?.players.contains(where: \.isLive) == true
         }
@@ -197,11 +216,27 @@ final class AppModel: ObservableObject {
                 )
             }
         }
-        guard !matchups.isEmpty else { return }
 
-        SharedStore.saveTrackedWeek(loaded[0].week)
+        SharedStore.saveTrackedWeek(targetWeek)
         await liveActivities.sync(matchups)
         isTrackingLiveActivity = liveActivities.isTracking
+    }
+
+    private func muteLiveActivity() {
+        UserDefaults.standard.set(true, forKey: Self.liveActivityMutedKey)
+        UserDefaults.standard.set(week, forKey: Self.liveActivityMutedWeekKey)
+    }
+
+    /// A mute outlives only the week it was set in: a new week of games is a new
+    /// decision, so tracking comes back without the user having to remember.
+    private func isLiveActivityMuted(for week: Int) -> Bool {
+        guard UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey) else { return false }
+        guard UserDefaults.standard.integer(forKey: Self.liveActivityMutedWeekKey) == week else {
+            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedKey)
+            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedWeekKey)
+            return false
+        }
+        return true
     }
 
     // MARK: Weeks

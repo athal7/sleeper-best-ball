@@ -6,11 +6,13 @@ import BestBallKit
 
 /// A tappable player anywhere in the app.
 ///
-/// Tapping opens the Sleeper app. It has no per-player deep link — its universal
-/// links cover only its chat pages (`/topics/`, `/channels/`, `/message/`) and the
-/// `sleeper://` scheme has no documented player route, so it opens on its home
-/// screen rather than the player. When the app is not installed the tap falls
-/// through to the player's web profile, which does land on the player.
+/// Tapping opens the player's Sleeper page. Sleeper's app has no per-player deep
+/// link to open — the universal links it registers (see the AASA for
+/// sleeper.com) cover only its chat pages, and `sleeper://` with no path hands
+/// you back to whatever screen the app last showed, which is why the old tap
+/// landed on a league matchup. The profile URL is the one address that actually
+/// resolves to the player, so it is opened directly instead of trying the app
+/// first.
 struct PlayerLink: Identifiable, Hashable {
     let id: String
     let name: String
@@ -28,10 +30,8 @@ struct PlayerLink: Identifiable, Hashable {
         self.init(id: player.id, name: player.name)
     }
 
-    /// The page the Streamlit app links to.
+    /// The page the Streamlit app links to, and the one this tap opens.
     var webURL: URL? { SleeperProfile.url(name: name, id: id) }
-
-    static var appURL: URL? { URL(string: "sleeper://") }
 }
 
 // MARK: - The name itself
@@ -44,7 +44,7 @@ struct PlayerNameButton: View {
     var weight: Font.Weight = .regular
 
     var body: some View {
-        Button(action: openInSleeperApp) {
+        Button(action: openPlayer) {
             Text(player.name)
                 .font(font.weight(weight))
                 .lineLimit(1)
@@ -55,15 +55,11 @@ struct PlayerNameButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens this player in Sleeper")
+        .accessibilityHint("Opens this player's Sleeper page")
     }
 
-    /// One tap, no chooser: the app if it takes the URL, else the web profile.
-    private func openInSleeperApp() {
-        guard let appURL = PlayerLink.appURL else { return }
-        UIApplication.shared.open(appURL, options: [:]) { opened in
-            guard !opened, let webURL = player.webURL else { return }
-            UIApplication.shared.open(webURL)
-        }
+    private func openPlayer() {
+        guard let url = player.webURL else { return }
+        UIApplication.shared.open(url)
     }
 }

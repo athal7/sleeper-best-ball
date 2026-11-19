@@ -65,8 +65,10 @@ enum BackgroundRefresh {
         // can't end the chain.
         schedule()
 
-        guard SharedStore.loadUsername() != nil,
-              !UserDefaults.standard.bool(forKey: AppModel.liveActivityMutedKey) else {
+        // The mute is not checked here: the refresh is also what starts tracking
+        // when a game goes live and what posts waiver notifications, and
+        // syncLiveActivities honours the mute on its own.
+        guard SharedStore.loadUsername() != nil else {
             task.setTaskCompleted(success: true)
             return
         }
