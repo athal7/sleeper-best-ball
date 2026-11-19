@@ -42,14 +42,21 @@ final class LiveActivityController {
             if let existing = activity(for: matchup.leagueID) {
                 await existing.update(content)
             } else if Activity<MatchupActivityAttributes>.activities.count < Self.maxActivities {
-                _ = try? Activity.request(
-                    attributes: MatchupActivityAttributes(
-                        leagueID: matchup.leagueID,
-                        leagueName: matchup.leagueName
-                    ),
-                    content: content,
-                    pushType: nil
-                )
+                do {
+                    _ = try Activity.request(
+                        attributes: MatchupActivityAttributes(
+                            leagueID: matchup.leagueID,
+                            leagueName: matchup.leagueName
+                        ),
+                        content: content,
+                        pushType: nil
+                    )
+                } catch {
+                    // Nothing else would report this: the card would just never
+                    // appear, which is indistinguishable from a toggle that does
+                    // nothing.
+                    print("Live Activity request failed for \(matchup.leagueID): \(error)")
+                }
             }
         }
 

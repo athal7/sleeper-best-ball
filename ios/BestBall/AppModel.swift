@@ -26,6 +26,11 @@ final class AppModel: ObservableObject {
 
     @Published private(set) var isTrackingLiveActivity = LiveActivityController.shared.isTracking
 
+    /// Whether tracking is armed for the week on screen, which is what the
+    /// toggle shows — the cards themselves only appear once a game is on.
+    @Published private(set) var isLiveActivityMuted = false
+    var isLiveActivityEnabled: Bool { !isLiveActivityMuted }
+
     /// Add/drop suggestions across every league, best first.
     @Published private(set) var waivers: [WaiverPick] = []
     /// Suggestions you haven't opened the Waivers screen for yet.
@@ -178,15 +183,19 @@ final class AppModel: ObservableObject {
 
     // MARK: Live Activities
 
-    /// Starts or stops tracking for every league at once.
+    /// Vetoes or restores tracking for the week on screen.
+    ///
+    /// The switch is not a read-out of "a card exists": before kickoff there is
+    /// nothing to show, and a switch that springs back off at that point is
+    /// indistinguishable from one that is broken. It shows whether tracking is
+    /// armed for this week, and the cards themselves still wait for a game.
     func toggleLiveActivity() async {
-        if liveActivities.isTracking {
+        if !isLiveActivityMuted {
             muteLiveActivity()
             await liveActivities.end()
             isTrackingLiveActivity = false
         } else {
-            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedKey)
-            UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedWeekKey)
+            unmuteLiveActivity()
             await syncLiveActivities(from: leagueWeeks)
             if isTrackingLiveActivity { BackgroundRefresh.schedule() }
         }
@@ -202,7 +211,8 @@ final class AppModel: ObservableObject {
         guard !loaded.isEmpty else { return }
 
         let targetWeek = loaded[0].week
-        guard !isLiveActivityMuted(for: targetWeek) else {
+        isLiveActivityMuted = storedMute(for: targetWeek)
+        guard !isLiveActivityMuted else {
             isTrackingLiveActivity = liveActivities.isTracking
             return
         }
@@ -212,9 +222,7 @@ final class AppModel: ObservableObject {
         // live (all games done, or none started yet). The controller ends any
         // card whose league dropped out of this list, so a card never outlives
         // the game that justified it.
-        let liveNow = loaded.filter { week in
-            week.userTeam?.players.contains(where: \.isLive) == true
-        }
+        let liveNow = loaded.filter { $0.userTeam?.players.contains(where: \.isLive) ?? false }
         let matchups = liveNow.prefix(LiveActivityController.maxActivities).compactMap { week in
             week.widgetSnapshot().map {
                 LiveActivityController.TrackedMatchup(
@@ -233,11 +241,18 @@ final class AppModel: ObservableObject {
     private func muteLiveActivity() {
         UserDefaults.standard.set(true, forKey: Self.liveActivityMutedKey)
         UserDefaults.standard.set(week, forKey: Self.liveActivityMutedWeekKey)
+        isLiveActivityMuted = true
+    }
+
+    private func unmuteLiveActivity() {
+        UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedKey)
+        UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedWeekKey)
+        isLiveActivityMuted = false
     }
 
     /// A mute outlives only the week it was set in: a new week of games is a new
     /// decision, so tracking comes back without the user having to remember.
-    private func isLiveActivityMuted(for week: Int) -> Bool {
+    private func storedMute(for week: Int) -> Bool {
         guard UserDefaults.standard.bool(forKey: Self.liveActivityMutedKey) else { return false }
         guard UserDefaults.standard.integer(forKey: Self.liveActivityMutedWeekKey) == week else {
             UserDefaults.standard.removeObject(forKey: Self.liveActivityMutedKey)

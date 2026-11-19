@@ -163,11 +163,16 @@ confirming it actually archived and uploaded.
 - Live Activities are gated on `RosterPlayer.isLive` and start themselves:
   `syncLiveActivities` runs on every load, starts a card for each league with a
   player on the field, and ends the cards whose league dropped out — so nothing
-  waits for a tap at kickoff, and a card never outlives its game. The toggle only
-  writes a mute, scoped to the week it was set in (`liveActivityMutedWeekKey`), so
-  the next week's games come back on their own. `BackgroundRefresh` deliberately
-  does not check that mute: it is also what starts tracking and posts waiver
-  notifications.
+  waits for a tap at kickoff, and a card never outlives its game. The same sync
+  backs the toggle. The switch shows whether tracking is armed for the week
+  (`isLiveActivityEnabled`), not whether a card is up: before kickoff there is
+  nothing to show, and a switch bound to `isTrackingLiveActivity` snapped back
+  off the instant it was tapped, which reads as broken. On is the default state,
+  so turning it off is what does something — it writes a mute for the week
+  (`liveActivityMutedWeekKey`) and ends the cards; turning it back on clears the
+  mute. The mute is scoped to the week it was set in, so the next week's games
+  come back on their own. A card is never started before a game is on. `BackgroundRefresh` deliberately does not check the mute: it is also what
+  starts tracking and posts waiver notifications.
 - The tip jar (`ios/BestBall/TipJarView.swift`) uses consumable products named
   `<bundle id>.tip.small|medium|large`. They must exist in App Store Connect for a
   paid team before any purchase works; a sideloaded build shows "unavailable", which

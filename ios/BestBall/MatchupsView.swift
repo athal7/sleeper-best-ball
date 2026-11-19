@@ -211,7 +211,10 @@ struct MatchupsView: View {
 
     private var liveActivityDetail: String {
         guard model.liveActivitiesAuthorized else { return "Off in iOS Settings" }
-        guard model.isTrackingLiveActivity else { return "Starts when a game is on" }
+        guard model.isLiveActivityEnabled else { return "Off for this week" }
+        // Nothing on the field yet, so there is no card to point at, but the
+        // tracking is armed and kickoff will put it up.
+        guard model.isTrackingLiveActivity else { return "On — starts at kickoff" }
         let count = model.trackedLeagueCount
         return count == 1 ? "Tracking 1 league" : "Tracking \(count) leagues"
     }
@@ -220,12 +223,12 @@ struct MatchupsView: View {
         guard model.liveActivitiesAuthorized else {
             return "Live Activities are turned off for Best Ball in Settings, so no card can appear until you allow them there."
         }
-        return "While you have a player in a game, this week's scores sit on your Lock Screen and in the Dynamic Island, one card per league — it turns itself on at kickoff and goes away once the week's games are done. Scores refresh when the app does, including the background refresh iOS schedules; no server is involved."
+        return "One card per league on your Lock Screen and in the Dynamic Island. It appears when one of your players' games starts and goes away once the week's games are done. Turning this off is a veto for the week on screen — leaving it on changes nothing, since kickoff starts tracking on its own. Scores refresh when the app does, including the background refresh iOS schedules; no server is involved."
     }
 
     private var liveActivityBinding: Binding<Bool> {
         Binding(
-            get: { model.isTrackingLiveActivity },
+            get: { model.isLiveActivityEnabled },
             set: { _ in Task { await model.toggleLiveActivity() } }
         )
     }
