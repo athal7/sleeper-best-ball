@@ -3,6 +3,8 @@ import BestBallKit
 
 struct MatchupsView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openURL) private var openURL
+    @Environment(\.requestReview) private var requestReview
     @State private var showingWaivers = false
     @State private var showingTrades = false
     @State private var showingTips = false
@@ -46,8 +48,22 @@ struct MatchupsView: View {
                     } label: {
                         Label("Send a tip", systemImage: "heart")
                     }
+
+                    Button {
+                        if let url = Self.feedbackURL {
+                            openURL(url)
+                        }
+                    } label: {
+                        Label("Send feedback", systemImage: "envelope")
+                    }
+
+                    Button {
+                        requestReview()
+                    } label: {
+                        Label("Rate in the App Store", systemImage: "star")
+                    }
                 } footer: {
-                    Text("The app is free and ad-free. Tips go straight to the developer through the App Store.")
+                    Text("The app is free and ad-free. Tips go straight to the developer through the App Store. Feedback opens an email with your app and iOS versions attached; rating opens the App Store review prompt.")
                 }
             }
             .navigationTitle("My Scores")
@@ -110,6 +126,30 @@ struct MatchupsView: View {
                 }
             }
         }
+    }
+
+    // MARK: Feedback
+
+    /// Where feedback lands. Change this if the address ever moves.
+    static let feedbackAddress = "extent-vegans-5p@icloud.com"
+
+    /// Opens a mail draft with the app and system versions prefilled, so a bug
+    /// report doesn't start with "which build are you on?".
+    static var feedbackURL: URL? {
+        guard var components = URLComponents(string: "mailto:\(feedbackAddress)") else {
+            return nil
+        }
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "unknown"
+        let build = info?["CFBundleVersion"] as? String ?? "unknown"
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: "Best Ball feedback"),
+            URLQueryItem(
+                name: "body",
+                value: "\n\n---\nApp \(version) (\(build)) · \(ProcessInfo.processInfo.operatingSystemVersionString)"
+            )
+        ]
+        return components.url
     }
 
     // MARK: Sections
