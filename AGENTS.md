@@ -58,9 +58,14 @@ xcrun devicectl device install app --device <device-udid> \
   "$HOME/Library/Developer/Xcode/DerivedData/BestBall-*/Build/Products/Debug-iphoneos/BestBall.app"
 ```
 
-Signing is automatic with team `MH5EJ3Q33X` and bundle id `com.sleeperbestball.app`
-(overridable through the `BB_BUNDLE_ID` build setting). An install is not
-verification of the UI — the screen has not been looked at unless someone ran it.
+Signing is automatic with team `FDW9E6KH3V` (Optipotamus LLC) and bundle id
+`com.sleeperbestball.app` (overridable through the `BB_BUNDLE_ID` build setting).
+`MH5EJ3Q33X` is a personal team: it provisions for a device but cannot mint an
+App Store profile, so an export or upload under it fails. The App Store record
+uses `BB_BUNDLE_ID=com.optipotamus.bestball` on the archive command line rather
+than in the project, because `com.sleeperbestball.app` cannot be registered to a
+paid team while the personal team holds it. An install is not verification of
+the UI — the screen has not been looked at unless someone ran it.
 
 ## TestFlight
 
